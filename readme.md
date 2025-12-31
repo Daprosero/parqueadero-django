@@ -64,7 +64,7 @@ python3.11 --version
 ## 2) Clonar el repositorio
 
 ```bash
-git clone <URL_DEL_REPOSITORIO>
+git clone https://github.com/Daprosero/parqueadero-django.git
 cd Parqueadero
 ```
 
