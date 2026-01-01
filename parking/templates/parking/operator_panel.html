@@ -1,0 +1,91 @@
+{% extends "parking/base.html" %}
+
+{% block title %}Operario{% endblock %}
+
+{% block content %}
+  <h2>Panel Operario</h2>
+
+  <style>
+    .mode-tabs {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .mode-tab {
+      flex: 1;
+      text-decoration: none;
+    }
+
+    .mode-btn {
+      width: 100%;
+      padding: 8px 15px;
+      background-color: #2c7be5;   /* color normal */
+      border: none;
+      color: #fff;
+      cursor: pointer;
+      border-radius: 3px;
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .mode-btn:hover {
+      background-color: #1a5bb8;
+    }
+
+    .mode-btn.active {
+      background-color: #1a5bb8; /* pestaña activa */
+    }
+  </style>
+
+  <!-- BOTONES DE MODO -->
+  <div class="mode-tabs">
+    <a class="mode-tab" href="?mode=checkin">
+      <button
+        type="button"
+        class="mode-btn {% if mode == 'checkin' %}active{% endif %}">
+        Registro
+      </button>
+    </a>
+
+    <a class="mode-tab" href="?mode=charge">
+      <button
+        type="button"
+        class="mode-btn {% if mode == 'charge' %}active{% endif %}">
+        Cobro
+      </button>
+    </a>
+  </div>
+
+  {% if messages %}
+    <ul style="padding-left:18px;">
+      {% for m in messages %}
+        <li>{{ m }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  <!-- ===== REGISTRO ===== -->
+  {% if mode == "checkin" %}
+    <form method="post">
+      {% csrf_token %}
+      {{ checkin_form.as_p }}
+      <button type="submit" style="width:100%;">Registrar ingreso</button>
+    </form>
+  {% endif %}
+
+  <!-- ===== COBRO ===== -->
+  {% if mode == "charge" %}
+    <form method="post">
+      {% csrf_token %}
+      {{ charge_form.as_p }}
+      <button type="submit" style="width:100%;">Cobrar y cerrar</button>
+    </form>
+
+    {% if amount %}
+      <div style="margin-top:12px; padding:10px; background:#f5f5f5; border:1px solid #ddd;">
+        <strong>Total:</strong> {{ amount }} COP
+      </div>
+    {% endif %}
+  {% endif %}
+{% endblock %}

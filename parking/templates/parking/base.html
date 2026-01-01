@@ -1,0 +1,176 @@
+{% load static %}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}Parqueadero Los Cámbulos{% endblock %}</title>
+
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background-color: #f5f5f5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      color: #000;
+    }
+
+    header {
+      background-color: #ffffff;
+      border-bottom: 2px solid #ddd;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      color: #000;
+    }
+
+    header * { color: #000; }
+
+    .logo {
+      width: 90px;
+      height: 90px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .logo img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+
+    .site-title {
+      font-size: 22px;
+      font-weight: bold;
+      color: #000;
+    }
+
+    /* ===== NAV ADMIN (solo para staff) ===== */
+    .admin-nav {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-right: 12px;
+    }
+
+    .admin-nav a {
+      font-weight: bold;
+      color: #000;
+      text-decoration: none;
+    }
+
+    .admin-nav a:hover {
+      text-decoration: underline;
+    }
+
+    /* ===== LOGOUT COMO LINK (pero por POST) ===== */
+    .logout-form {
+      margin: 0;
+    }
+
+    .logout-link {
+      background: transparent;
+      border: 0;
+      padding: 0;
+      margin: 0;
+      font: inherit;
+      font-weight: bold;          /* igual a admin-nav */
+      color: #000;
+      cursor: pointer;
+      text-decoration: none;      /* igual a admin-nav */
+    }
+
+    .logout-link:hover {
+      text-decoration: underline; /* igual a admin-nav:hover */
+    }
+
+    main { flex: 1; padding: 40px; }
+
+    .container {
+      background: #ffffff;
+      padding: 30px;
+      max-width: 420px;
+      margin: 0 auto;
+      border-radius: 4px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+      color: #000;
+    }
+
+    footer {
+      background-color: #ffffff;
+      border-top: 2px solid #ddd;
+      text-align: center;
+      padding: 12px 20px;
+      font-size: 12px;
+      color: #000;
+      line-height: 1.5;
+      margin-top: 10px;
+    }
+
+    footer * { color: #000; }
+
+    a { color: #000; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    @media print {
+      header, footer { display: none; }
+      main { padding: 0; }
+      .container {
+        box-shadow: none;
+        border-radius: 0;
+        max-width: 100%;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <header>
+    <div style="display:flex; align-items:center; gap:20px;">
+      <div class="logo">
+        <img src="{% static 'img/logo.png' %}" alt="Logo Parqueadero Los Cámbulos">
+      </div>
+      <div class="site-title">Parqueadero Los Cámbulos</div>
+    </div>
+
+    <div style="display:flex; align-items:center; gap:12px;">
+      {# Solo para staff: en dashboard mostramos solo Administrador #}
+      {% if user.is_authenticated and user.is_staff %}
+        <div class="admin-nav">
+          {% if is_admin_dashboard %}
+            <a href="/admin/">Administrador</a>
+          {% endif %}
+        </div>
+      {% endif %}
+
+      {% if user.is_authenticated %}
+        <form class="logout-form" method="post" action="{% url 'logout' %}">
+          {% csrf_token %}
+          <button class="logout-link" type="submit">Cerrar sesión</button>
+        </form>
+      {% endif %}
+    </div>
+  </header>
+
+  <main>
+    <div class="container">
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+
+  <footer>
+    NIT 75.081.166-3 · Vía Termales frente a ACASA, BRR La Enea<br>
+    Tel: (606) 3122775300 · Manizales – Colombia<br>
+    parqueaderoloscambulos@gmail.com<br>
+    © {% now "Y" %} Parqueadero Los Cámbulos
+  </footer>
+
+</body>
+</html>

@@ -1,0 +1,17 @@
+{% extends "parking/base.html" %}
+
+{% block title %}Login - Parqueadero{% endblock %}
+
+{% block content %}
+  <h2>Ingreso al sistema</h2>
+
+  {% if form.errors %}
+    <p style="color:red;">Usuario o contraseña incorrectos</p>
+  {% endif %}
+
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit">Ingresar</button>
+  </form>
+{% endblock %}

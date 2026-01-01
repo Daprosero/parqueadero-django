@@ -1,0 +1,129 @@
+{% extends "admin/base.html" %}
+{% load static %}
+
+{% block title %}Parqueadero Los Cámbulos | Administración{% endblock %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+  /* ===== TIPOGRAFÍA Y COLOR GLOBAL ===== */
+  body,
+  #header,
+  #header a,
+  #branding h1,
+  #branding h1 a,
+  #user-tools,
+  #user-tools a,
+  #user-tools button,
+  #nav-global a,
+  .breadcrumbs,
+  .breadcrumbs a,
+  .module,
+  table,
+  th,
+  td,
+  label,
+  input,
+  select,
+  textarea {
+    font-family: Arial, Helvetica, sans-serif;
+    color: #000 !important;
+  }
+
+  /* ===== HEADER ===== */
+  #header {
+    background-color: #ffffff !important;
+    border-bottom: 2px solid #ddd;
+    padding: 12px 20px;
+  }
+
+  #branding {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  #branding h1 a {
+    font-size: 22px;
+    font-weight: bold;
+    text-decoration: none;
+    color: #000 !important;
+  }
+
+  /* ===== NAV GLOBAL (Dashboard) ===== */
+  #nav-global a {
+    color: #000 !important;
+    font-weight: bold;
+    margin-right: 15px;
+    text-decoration: none;
+  }
+
+  #nav-global a:hover {
+    text-decoration: underline;
+  }
+
+  /* ===== FIX DEFINITIVO: LOGOUT DJANGO (ES UN BOTÓN) ===== */
+  #user-tools,
+  #user-tools * {
+    color: #000 !important;
+  }
+
+  #user-tools form {
+    margin: 0 !important;
+  }
+
+  #user-tools button {
+    background: transparent !important;
+    border: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    font: inherit !important;
+    cursor: pointer !important;
+    color: #000 !important;
+  }
+
+  #user-tools button:hover {
+    text-decoration: underline;
+  }
+
+  /* ===== FOOTER ===== */
+  #custom-admin-footer {
+    background-color: #ffffff;
+    border-top: 2px solid #ddd;
+    text-align: center;
+    padding: 12px 20px;
+    font-size: 12px;
+    color: #000;
+    line-height: 1.5;
+    margin-top: 20px;
+  }
+</style>
+{% endblock %}
+
+{% block branding %}
+<div style="width:90px; height:90px; display:flex; align-items:center;">
+  <img src="{% static 'img/logo.png' %}"
+       alt="Logo Parqueadero Los Cámbulos"
+       style="max-width:100%; max-height:100%; object-fit:contain;">
+</div>
+
+<h1>
+  <a href="{% url 'admin:index' %}">
+    Parqueadero Los Cámbulos
+  </a>
+</h1>
+{% endblock %}
+
+{# En admin SOLO mostramos Dashboard #}
+{% block nav-global %}
+<a href="{% url 'admin_dashboard' %}">Dashboard</a>
+{% endblock %}
+
+{% block footer %}
+<div id="custom-admin-footer">
+  NIT 75.081.166-3 · Vía Termales frente a ACASA, BRR La Enea<br>
+  Tel: (606) 3122775300 · Manizales – Colombia<br>
+  parqueaderoloscambulos@gmail.com<br>
+  © {% now "Y" %} Parqueadero Los Cámbulos
+</div>
+{% endblock %}

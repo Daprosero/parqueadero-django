@@ -1,40 +1,59 @@
 from django.contrib.auth.decorators import login_required
-from django.shortcuts import render, redirect, get_object_or_404
+from django.shortcuts import render, redirect
 from django.utils import timezone
 from django.contrib import messages
+from django.contrib.admin.views.decorators import staff_member_required
 
 from .forms import TicketCreateForm, ChargeForm
 from .models import Ticket
 
+
+def home(request):
+    return redirect("login")
+
+
 @login_required
-def operator_checkin(request):
-    if request.method == "POST":
-        form = TicketCreateForm(request.POST)
-        if form.is_valid():
-            ticket = form.save(commit=False)
+def post_login_redirect(request):
+    user = request.user
+
+    # Admin -> Django Admin por defecto
+    if user.is_staff or user.is_superuser:
+        return redirect("/admin/")
+
+    # Operario -> panel único
+    return redirect("operator_panel")
+
+
+@login_required
+def operator_panel(request):
+    mode = request.GET.get("mode", "checkin")  # checkin | charge
+
+    checkin_form = TicketCreateForm()
+    charge_form = ChargeForm()
+    amount = None
+
+    # ---- REGISTRO (checkin) ----
+    if request.method == "POST" and mode == "checkin":
+        checkin_form = TicketCreateForm(request.POST)
+        if checkin_form.is_valid():
+            ticket = checkin_form.save(commit=False)
             ticket.created_by = request.user
             ticket.save()
             messages.success(request, f"Ingreso registrado: {ticket.plate}")
-            return redirect("operator_checkin")
-    else:
-        form = TicketCreateForm()
-    return render(request, "parking/operator_checkin.html", {"form": form})
+            checkin_form = TicketCreateForm()  # limpiar formulario
 
+    # ---- COBRO (charge) ----
+    if request.method == "POST" and mode == "charge":
+        charge_form = ChargeForm(request.POST)
+        if charge_form.is_valid():
+            plate = charge_form.cleaned_data["plate"].strip().upper()
+            ticket = Ticket.objects.filter(
+                plate__iexact=plate, status="ACTIVE"
+            ).order_by("-check_in").first()
 
-@login_required
-def operator_charge(request):
-    amount = None
-    ticket = None
-
-    if request.method == "POST":
-        form = ChargeForm(request.POST)
-        if form.is_valid():
-            plate = form.cleaned_data["plate"].strip().upper()
-            ticket = Ticket.objects.filter(plate__iexact=plate, status="ACTIVE").order_by("-check_in").first()
             if not ticket:
                 messages.error(request, "No existe un ticket activo para esa placa.")
             else:
-                # Calcular y cerrar
                 now = timezone.now()
                 amount = ticket.compute_amount_cop(end_time=now)
                 ticket.check_out = now
@@ -43,14 +62,19 @@ def operator_charge(request):
                 ticket.closed_by = request.user
                 ticket.save()
                 messages.success(request, f"Cobro realizado: {plate} -> {amount} COP")
-                ticket = None  # para limpiar vista
-    else:
-        form = ChargeForm()
-
-    active_tickets = Ticket.objects.filter(status="ACTIVE").order_by("-check_in")[:20]
 
     return render(
         request,
-        "parking/operator_charge.html",
-        {"form": form, "amount": amount, "ticket": ticket, "active_tickets": active_tickets},
+        "parking/operator_panel.html",
+        {
+            "mode": mode,
+            "checkin_form": checkin_form,
+            "charge_form": charge_form,
+            "amount": amount,
+        },
     )
+
+@staff_member_required
+def admin_dashboard(request):
+    return render(request, "parking/admin_dashboard.html", {"is_admin_dashboard": True})
+
