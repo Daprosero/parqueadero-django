@@ -19,6 +19,8 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 import math
 from django.db import transaction
+import json
+import re
 
 from .forms import (
     ClosePaymentForm,
