@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Recibo #{{ payment.id }}</title>
+    <style>
+        body {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 16px;            /* ✅ tamaño único global */
+            line-height: 1.28;
+            font-weight: 600;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+            text-rendering: geometricPrecision;
+            width: 80mm;
+            margin: 0 auto;
+            padding: 5px;
+            color: #000;
+            background: #fff;
+        }
+
+        /* 🔑 FUERZA que TODO herede el tamaño */
+        * {
+            font-size: inherit;
+        }
+
+        .no-print { margin-bottom: 15px; border-bottom: 1px solid #ccc; padding-bottom: 10px; text-align: center; }
+        button { cursor: pointer; padding: 8px 15px; font-weight: bold; border-radius: 5px; border: 1px solid #000; background:#fff; }
+
+        .text-center { text-align: center; }
+        .text-right { text-align: right; }
+        .bold { font-weight: bold; }
+        .uppercase { text-transform: uppercase; }
+
+        .header { margin-bottom: 10px; }
+        .business-name { font-weight: bold; margin-bottom: 2px; } /* ❌ sin font-size */
+
+        .dashed-line { border-bottom: 1px dashed #000; margin: 5px 0; display: block; width: 100%; }
+
+        .row { display: flex; justify-content: space-between; margin-bottom: 2px; gap: 10px; }
+        .label { font-weight: bold; }
+        .row span:last-child { text-align: right; }
+
+        @media print {
+            .no-print { display: none; }
+            body {
+                margin: 0;
+                zoom: 1;               /* evita reescalado */
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Botones -->
+    <div class="no-print">
+        <button onclick="window.print()">🖨️ IMPRIMIR</button>
+        <a href="{{ request.GET.next|default:finish_url }}" style="text-decoration:none;">
+            <button type="button">✔ Finalizar</button>
+        </a>
+    </div>
+
+    <!-- Encabezado Negocio -->
+    <div class="header text-center">
+        <div class="business-name uppercase">Parqueadero Los Cambulos</div>
+        <div>Nit: 75081166-3</div>
+        <div class="uppercase">Jorge Eliecer Quiceno</div>
+        <div>Correo: parqueaderoloscambulos@gmail.com</div>
+        <div>Cel: 312 277 5300</div>
+    </div>
+
+    <div class="dashed-line"></div>
+
+    <!-- Información Transacción -->
+    <div class="row">
+        <span class="label">Tipo:</span>
+        <span>{{ client_type_label }}</span>
+    </div>
+    <div class="row">
+        <span class="label">Recibo N:</span>
+        <span class="bold">{{ payment.id }}</span>
+    </div>
+
+    <!-- Estado -->
+    <div class="row">
+        <span class="label">Estado:</span>
+        <span class="bold">
+            {% if payment.method == "CREDIT" %}
+                {% if payment.company and payment.company.credit_enabled %}
+                    CRÉDITO
+                {% else %}
+                    PENDIENTE
+                {% endif %}
+            {% else %}
+                {% if payment.status == "PAID" %}
+                    PAGADO
+                {% else %}
+                    PENDIENTE
+                {% endif %}
+            {% endif %}
+        </span>
+    </div>
+
+    <div class="dashed-line"></div>
+
+    <!-- Datos Vehículo -->
+    <div class="row">
+        <span class="label">PLACA:</span>
+        <span class="bold uppercase">{{ ticket.plate }}</span>
+    </div>
+    <div class="row">
+        <span class="label">Vehículo:</span>
+        <span>{{ ticket.vehicle_type.name }}</span>
+    </div>
+
+    <div class="dashed-line"></div>
+
+    <!-- Tarifas -->
+    <div class="row">
+        <span class="label bold">
+            {% if is_taller %}Parqueadero (Noches):{% else %}Parqueadero (Horas):{% endif %}
+        </span>
+        <span class="bold">${{ parking_val_fmt }}</span>
+    </div>
+
+    {% if has_service %}
+    <div style="margin-top: 5px;">
+        <div class="row">
+            <span class="label">Servicio:</span>
+            <span>{{ service_name }}</span>
+        </div>
+        <div class="row">
+            <span class="label">Valor Servicio:</span>
+            <span class="bold">${{ service_val_fmt }}</span>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="dashed-line"></div>
+
+    <!-- Tiempos -->
+    <div class="row">
+        <span class="label">Entrada:</span>
+        <span>{{ ticket.check_in|date:"d/m/Y h:i:s A" }}</span>
+    </div>
+    <div class="row">
+        <span class="label">Salida:</span>
+        <span>
+            {% if ticket.check_out %}
+                {{ ticket.check_out|date:"d/m/Y h:i:s A" }}
+            {% else %}
+                —
+            {% endif %}
+        </span>
+    </div>
+    <div class="row" style="margin-top: 5px;">
+        <span class="label">
+            {% if is_taller %}Tiempo (Noches):{% else %}Tiempo Total:{% endif %}
+        </span>
+        <span class="bold">{{ duration_str }}</span>
+    </div>
+
+    <div class="dashed-line"></div>
+
+    <!-- Total -->
+    <div class="row" style="margin-top: 5px;">
+        <span class="bold">TOTAL:</span>
+        <span class="bold">${{ total_fmt }}</span>
+    </div>
+
+    <!-- Método de pago -->
+    <div class="text-center" style="margin-top: 10px;">
+        {% if payment.method == 'CASH' %}
+            EFECTIVO
+        {% elif payment.method == 'TRANSFER' %}
+            TRANSFERENCIA
+            {% if payment.transfer_ref %}
+                <div style="margin-top:4px;">Ref: <span class="bold">{{ payment.transfer_ref }}</span></div>
+            {% endif %}
+        {% elif payment.method == 'CREDIT' %}
+            {% if payment.company and payment.company.credit_enabled %}
+                CRÉDITO EMPRESA
+            {% else %}
+                PENDIENTE EMPRESA
+            {% endif %}
+            <br>
+            {% if payment.company %}
+                <span class="bold uppercase">
+                    {{ payment.company.full_name }}
+                </span>
+            {% endif %}
+        {% endif %}
+    </div>
+
+    <!-- Factura electrónica -->
+    {% if payment.invoice_required %}
+    <div class="dashed-line"></div>
+    <div>
+        <div class="bold text-center">FACTURA ELECTRÓNICA</div>
+        {% if payment.customer %}
+            <div class="row" style="margin-top:5px;">
+                <span class="label">Cédula/NIT:</span>
+                <span class="bold">{{ payment.customer.id_number }}</span>
+            </div>
+            <div class="row">
+                <span class="label">Nombre:</span>
+                <span>{{ payment.customer.full_name }}</span>
+            </div>
+            <div class="row">
+                <span class="label">Correo:</span>
+                <span>{{ payment.customer.email }}</span>
+            </div>
+        {% else %}
+            <div class="text-center" style="margin-top:6px;">(Sin datos de cliente)</div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="text-center" style="margin-top: 20px;">
+        ¡Gracias por su confianza!
+    </div>
+    <div style="text-align:center;">.</div>
+
+</body>
+</html>

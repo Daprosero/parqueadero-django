@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Reporte Vehículos Activos</title>
+  <style>
+    body {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 16px;            /* ✅ todo a 16 */
+      line-height: 1.28;
+      font-weight: 600;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+      text-rendering: geometricPrecision;
+      width: 80mm;
+      margin: 0 auto;
+      padding: 5px;
+      color: #000;
+      background: #fff;
+    }
+
+    /* 🔑 fuerza herencia total del tamaño */
+    * { font-size: inherit; }
+
+    .no-print {
+      margin-bottom: 15px;
+      border-bottom: 1px solid #ccc;
+      padding-bottom: 10px;
+      text-align: center;
+    }
+    button {
+      cursor: pointer;
+      padding: 8px 15px;
+      font-weight: bold;
+      border-radius: 5px; /* igual que recibo */
+      border: 1px solid #000;
+      background: #fff;
+    }
+
+    /* === MISMAS CLASES DEL RECIBO === */
+    .text-center { text-align: center; }
+    .text-right { text-align: right; }
+    .bold { font-weight: bold; }
+    .uppercase { text-transform: uppercase; }
+
+    .header { margin-bottom: 10px; }
+    .business-name { font-weight: bold; margin-bottom: 2px; } /* ❌ sin font-size */
+
+    .dashed-line {
+      border-bottom: 1px dashed #000;
+      margin: 5px 0;           /* igual que recibo */
+      display: block;
+      width: 100%;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 5px;
+      table-layout: fixed;
+    }
+
+    th {
+      text-align: left;
+      text-transform: uppercase;
+      padding-bottom: 3px;
+    }
+
+    td {
+      vertical-align: top;
+      padding: 3px 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    /* ✅ ENTRADA: 2 líneas, sin recorte */
+    td.col-entry {
+      white-space: normal !important;
+      overflow: visible !important;
+      text-overflow: clip !important;
+      line-height: 1.15;
+    }
+
+    @media print {
+      .no-print { display: none; }
+      body { margin: 0; zoom: 1; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Botones (no imprimen) -->
+  <div class="no-print">
+    <button type="button" onclick="window.print()">🖨️ IMPRIMIR</button>
+
+    <!-- ✅ Finalizar robusto -->
+     
+    <button type="button" onclick="window.location.href='{{ finish_url }}'">⬅ Finalizar</button>
+  </div>
+
+
+  <!-- Encabezado Negocio (MISMO ESTILO DEL RECIBO) -->
+  <div class="header text-center">
+    <div class="business-name uppercase">Parqueadero Los Cambulos</div>
+    <div>Nit: 75081166-3</div>
+    <div class="uppercase">Jorge Eliecer Quiceno</div>
+    <div>Correo: parqueaderoloscambulos@gmail.com</div>
+    <div>Cel: 312 277 5300</div>
+  </div>
+
+  <div class="dashed-line"></div>
+
+  <!-- Encabezado Reporte (mismo look del recibo) -->
+  <div class="text-center" style="margin-bottom: 10px;">
+    <div class="business-name uppercase">Reporte Vehículos Activos</div>
+    <div>Fecha: {{ now|date:"d/m/Y h:i A" }}</div>
+  </div>
+
+  <div class="dashed-line"></div>
+
+  <!-- Cabecera -->
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 30%;">Placa</th>
+        <th style="width: 32%;">Tipo</th>
+        <th style="width: 38%;" class="text-right">Entrada</th>
+      </tr>
+    </thead>
+  </table>
+
+  <div class="dashed-line"></div>
+
+  <!-- Filas -->
+  <table>
+    <tbody>
+      {% for t in active_tickets %}
+      <tr>
+        <td style="width:30%;">{{ t.plate }}</td>
+
+        <td style="width:32%;">
+          {% if t.vehicle_type %}
+            {{ t.vehicle_type.name|default:t.vehicle_type }}
+          {% elif t.vehicle_type_name %}
+            {{ t.vehicle_type_name }}
+          {% else %}
+            -
+          {% endif %}
+        </td>
+
+        <!-- ✅ ENTRADA EN DOS LÍNEAS -->
+        <td style="width:38%;" class="text-right col-entry">
+          {% if t.check_in %}
+            <div>{{ t.check_in|date:"d/m/Y" }}</div>
+            <div>{{ t.check_in|date:"h:i A" }}</div>
+          {% elif t.ui_checkin %}
+            <div>{{ t.ui_checkin }}</div>
+          {% else %}
+            -
+          {% endif %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="3" class="text-center">No hay vehículos activos.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="dashed-line"></div>
+
+  <div style="text-align:center; margin-top:20px;">.</div>
+</body>
+</html>

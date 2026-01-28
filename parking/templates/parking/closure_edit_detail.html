@@ -1,0 +1,318 @@
+{% extends "parking/base.html" %}
+
+{% block title %}Editar cierre #{{ closure.id }}{% endblock %}
+
+{% block layout %}
+  <div class="container gestion-container gestion-container-wide">
+    {% block content %}
+
+<style>
+  .gestion-container{ max-width: 520px; width: 100%; }
+  .gestion-container-wide{ max-width: 1100px; width: 100%; }
+
+  .card-title {
+    font-size: 1.5rem;
+    font-weight: 800;
+    margin: 0 0 10px 0;
+    color: var(--text-main);
+    text-align: center;
+  }
+
+  .back-link {
+    display: inline-block;
+    margin-bottom: 14px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-weight: 700;
+  }
+  .back-link:hover { color: var(--primary); }
+
+  .panel {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .panel-title {
+    font-weight: 900;
+    margin: 0 0 10px 0;
+    color: var(--text-main);
+  }
+
+  .action-btn {
+    width: 100%;
+    padding: 12px;
+    border-radius: 12px;
+    border: none;
+    font-weight: 900;
+    font-size: 1rem;
+    transition: 0.3s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    user-select: none;
+  }
+
+  .btn-disabled {
+    background: #e3ebf6;
+    color: #95aac9;
+    cursor: not-allowed;
+    opacity: 1;
+  }
+  .btn-active { background: var(--primary); color: #fff; cursor: pointer; }
+  .btn-active:hover { background: var(--primary-dark); }
+
+  .btn-mini {
+    width: auto;
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-size: 0.85rem;
+  }
+
+  /* ===========================
+     TABLAS (BASE)
+  =========================== */
+  .table-wrap{
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  table.simple {
+    width: 100%;
+    min-width: 980px;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+  table.simple th {
+    padding: 10px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    white-space: nowrap;
+  }
+  table.simple td {
+    padding: 10px;
+    border-bottom: 1px solid #f1f4f8;
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+
+  /* ===========================
+     ✅ AJUSTE 1: COLUMNA ACCIONES (SIN HUECOS)
+     - antes: min-width enorme
+     - ahora: ancho real y compacto
+  =========================== */
+  th.col-actions,
+  td.col-actions{
+    min-width: 0 !important;
+    width: 150px;                 /* 👈 AJUSTE CLAVE */
+    text-align: right;
+  }
+
+  .row-actions{
+    display: inline-flex;         /* 👈 NO ocupa toda la celda */
+    gap: 10px;
+    justify-content: flex-end;
+    align-items: center;
+    flex-wrap: nowrap;
+    width: 100%;
+  }
+
+  /* ===========================
+     ✅ AJUSTE 2: SCROLL (MAX ~3 FILAS)
+     - scroll vertical
+     - encabezado fijo
+  =========================== */
+  .tickets-scroll{
+    max-height: 220px;             /* ~3 registros visibles */
+    overflow-y: auto;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tickets-scroll thead th{
+    position: sticky;
+    top: 0;
+    background: #fff;
+    z-index: 2;
+  }
+
+  /* ===========================
+     AJUSTE FINO SOLO PARA ESTA TABLA
+     (evita reparto raro de columnas)
+  =========================== */
+  table.simple.tickets-table{
+    table-layout: fixed;
+  }
+
+  table.simple.tickets-table th.col-actions,
+  table.simple.tickets-table td.col-actions{
+    width: 150px;                 /* coherente con lo de arriba */
+  }
+
+  .meta{
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    line-height: 1.4;
+  }
+
+  .pill{
+    display:inline-block;
+    padding:6px 10px;
+    border-radius:999px;
+    font-weight:900;
+    font-size:0.8rem;
+    border:1px solid var(--border);
+    background:#f8fbff;
+    color:var(--text-main);
+  }
+
+  .warn{
+    border: 1px dashed var(--primary);
+    background: #f8fbff;
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-top: 10px;
+    color: var(--text-main);
+    font-weight: 800;
+    font-size: 0.92rem;
+  }
+</style>
+
+
+{# Feedback Mensajes #}
+{% if messages %}
+  {% for message in messages %}
+    <div style="background:#e3ebf6; color:#2c7be5; padding:10px; border-radius:8px; margin-bottom:16px; font-weight:900; text-align:center;">
+      {{ message }}
+    </div>
+  {% endfor %}
+{% endif %}
+
+<a href="{% url 'parking:closure_edit_panel' %}" class="back-link">← Volver a Cierres</a>
+
+<div class="card-title">Editar cierre #{{ closure.id }}</div>
+
+<p class="meta" style="text-align:center; margin-bottom:16px;">
+  <span class="pill">Periodo: {{ closure.period_start|date:"d/m/Y h:i a" }} → {{ closure.period_end|date:"d/m/Y h:i a" }}</span>
+  &nbsp;&nbsp;
+  <span class="pill">
+    Total actual:
+    ${{ closure.total_amount|default:0|floatformat:0 }}
+  </span>
+</p>
+
+<div class="panel">
+  <div class="panel-title">Acciones del cierre</div>
+
+  <div style="display:flex; gap:10px; flex-wrap:wrap;">
+    {# ✅ Recalcular: SIEMPRE visible y activo #}
+    <a href="{% url 'parking:closure_recalc' closure.id %}" class="action-btn btn-active" style="max-width:280px;">
+      🔄 Recalcular total
+    </a>
+
+    {# ✅ Reimprimir: BLOQUEADO hasta recalcular (recalc_ok) #}
+    {% if recalc_ok %}
+      <a href="{{ reprint_url }}" class="action-btn btn-active" style="max-width:280px;">
+        🖨 Reimprimir cierre
+      </a>
+    {% else %}
+      <span class="action-btn btn-disabled" style="max-width:280px; display:inline-flex;">
+        🖨 Reimprimir cierre
+      </span>
+    {% endif %}
+  </div>
+
+  {% if not recalc_ok %}
+    <div class="warn">
+      ⚠ Para habilitar <b>Reimprimir cierre</b> y <b>Recibo</b> en los tickets, primero debes presionar
+      <b>Recalcular total</b> (aunque no hayas cambiado nada).
+    </div>
+  {% endif %}
+
+  <div class="meta" style="margin-top:10px;">
+    * “Recalcular” vuelve a sumar los tickets asociados al cierre y habilita reimpresión/recibos.
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-title">Tickets del cierre</div>
+
+  <div class="table-wrap">
+    <div class="tickets-scroll">
+      <table class="simple tickets-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Placa</th>
+            <th>Vehículo</th>
+            <th>Cliente</th>
+            <th>Estado</th>
+            <th>Total</th>
+            <th class="col-actions">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in tickets %}
+            <tr>
+              <td>#{{ t.id }}</td>
+              <td>{{ t.plate }}</td>
+              <td>{{ t.vehicle_type.name }}</td>
+              <td>{{ t.get_client_kind_display }}</td>
+              <td>
+                {% if t.status == "ACTIVE" %}ACTIVO{% elif t.status == "PENDING" %}PENDIENTE{% else %}PAGADO{% endif %}
+              </td>
+
+              {# ✅ Usamos el formateo de la view si existe (t.ui_total), si no fallback #}
+              <td>
+                {% if t.ui_total %}
+                  ${{ t.ui_total }}
+                {% else %}
+                  ${{ t.total_amount_cop|default:0|floatformat:0 }}
+                {% endif %}
+              </td>
+
+              <td class="col-actions">
+                <div class="row-actions">
+                  {# Editar: siempre habilitado si existe url #}
+                  {% if t.url_edit %}
+                    <a class="action-btn btn-mini btn-active" href="{{ t.url_edit }}">Editar</a>
+                  {% else %}
+                    <span class="action-btn btn-mini btn-disabled" style="display:inline-flex;">Editar</span>
+                  {% endif %}
+
+                  {# ✅ Recibo: SIEMPRE habilitado (no depende de recalcular) #}
+                  {% if t.url_receipt %}
+                    <a class="action-btn btn-mini btn-active" href="{{ t.url_receipt }}">Recibo</a>
+                  {% else %}
+                    <span class="action-btn btn-mini btn-disabled" style="display:inline-flex;">Recibo</span>
+                  {% endif %}
+
+                </div>
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="7" style="padding:12px; color:var(--text-muted);">
+                No hay tickets asociados a este cierre.
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="meta" style="margin-top:10px;">
+    * “Editar” abre el ticket y al guardar vuelve aquí (vía <code>?next=...</code>).
+  </div>
+</div>
+
+    {% endblock %}
+  </div>
+{% endblock %}

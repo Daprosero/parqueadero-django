@@ -1,17 +1,40 @@
 {% extends "parking/base.html" %}
 
-{% block title %}Login - Parqueadero{% endblock %}
+{% block title %}Iniciar sesión{% endblock %}
 
 {% block content %}
-  <h2>Ingreso al sistema</h2>
+  <div style="text-align:center; margin-bottom:18px;">
+    <div style="font-size:1.6rem; font-weight:900; color:var(--text-main);">
+      Iniciar sesión
+    </div>
+    <div class="muted" style="margin-top:6px;">
+      Ingresa con tu usuario y contraseña para continuar.
+    </div>
+  </div>
 
   {% if form.errors %}
-    <p style="color:red;">Usuario o contraseña incorrectos</p>
+    <div class="error">
+      Usuario o contraseña incorrectos. Intenta nuevamente.
+    </div>
   {% endif %}
 
-  <form method="post">
+  <form method="post" style="margin-top:18px;">
     {% csrf_token %}
-    {{ form.as_p }}
-    <button type="submit">Ingresar</button>
+
+    <p style="margin:0 0 14px 0;">
+      <label for="id_username">Usuario</label>
+      {{ form.username }}
+    </p>
+
+    <p style="margin:0 0 16px 0;">
+      <label for="id_password">Contraseña</label>
+      {{ form.password }}
+    </p>
+
+    <button type="submit" class="btn-primary">Entrar</button>
+
+    <div class="muted" style="margin-top:14px; text-align:center;">
+      Si no tienes acceso, solicita tu usuario al administrador.
+    </div>
   </form>
 {% endblock %}

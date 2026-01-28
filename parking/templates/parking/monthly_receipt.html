@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Recibo Mensual</title>
+    <style>
+        body {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 16px;
+            line-height: 1.28;
+            font-weight: 600;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+            text-rendering: geometricPrecision;
+            width: 80mm;
+            margin: 0 auto;
+            padding: 5px;
+            color: #000;
+            background: #fff;
+        }
+
+        * { font-size: inherit; }
+
+        .no-print { margin-bottom: 15px; border-bottom: 1px solid #ccc; padding-bottom: 10px; text-align: center; }
+        button { cursor: pointer; padding: 8px 15px; font-weight: bold; border-radius: 5px; border: 1px solid #000; background:#fff; }
+
+        .text-center { text-align: center; }
+        .text-right { text-align: right; }
+        .bold { font-weight: bold; }
+        .uppercase { text-transform: uppercase; }
+
+        .header { margin-bottom: 10px; }
+        .business-name { font-weight: bold; }
+
+        .dashed-line { border-bottom: 1px dashed #000; margin: 5px 0; display: block; width: 100%; }
+
+        .row { display: flex; justify-content: space-between; margin-bottom: 2px; gap: 10px; }
+        .label { font-weight: bold; }
+        .row span:last-child { text-align: right; }
+
+        @media print {
+            .no-print { display: none; }
+            body { margin: 0; zoom: 1; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Botones -->
+    <div class="no-print">
+        <button onclick="window.print()">🖨️ IMPRIMIR</button>
+        <a href="{{ request.GET.next|default:finish_url|default:'/parking/gestion/?mode=monthly' }}" style="text-decoration:none;">
+            <button type="button">✔ Finalizar</button>
+        </a>
+    </div>
+
+    <!-- Encabezado Negocio -->
+    <div class="header text-center">
+        <div class="business-name uppercase">Parqueadero Los Cambulos</div>
+        <div>Nit: 75081166-3</div>
+        <div class="uppercase">Jorge Eliecer Quiceno</div>
+        <div>Correo: parqueaderoloscambulos@gmail.com</div>
+        <div>Cel: 312 277 5300</div>
+    </div>
+
+    <div class="dashed-line"></div>
+
+    <!-- Información Transacción -->
+    <div class="row">
+        <span class="label">Tipo:</span>
+        <span class="bold">MENSUAL</span>
+    </div>
+
+    <div class="row">
+        <span class="label">Estado:</span>
+        <span class="bold">PAGADO</span>
+    </div>
+
+    <div class="dashed-line"></div>
+
+    <!-- Datos Mensual -->
+    <div class="row">
+        <span class="label">PLACA:</span>
+        <span class="bold uppercase">{{ receipt.plate|default:"—" }}</span>
+    </div>
+
+    <div class="row">
+        <span class="label">Fecha:</span>
+        <span>{{ receipt.created_at|default:"—" }}</span>
+    </div>
+
+    <div class="dashed-line"></div>
+
+    <!-- Total -->
+    <div class="row" style="margin-top: 5px;">
+        <span class="bold">TOTAL:</span>
+        <span class="bold">
+            ${{ receipt.print_amount|default:"0" }}
+        </span>
+    </div>
+
+    <!-- Método de pago -->
+    <div class="text-center" style="margin-top: 10px;">
+        {% if receipt.method == 'TRANSFER' %}
+            TRANSFERENCIA
+        {% else %}
+            EFECTIVO
+        {% endif %}
+    </div>
+
+    <div class="text-center" style="margin-top: 20px;">
+        ¡Gracias por su confianza!
+    </div>
+
+    <div style="text-align:center;">.</div>
+
+</body>
+</html>

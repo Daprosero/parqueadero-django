@@ -2,90 +2,1539 @@
 
 {% block title %}Operario{% endblock %}
 
-{% block content %}
-  <h2>Panel Operario</h2>
+{% block layout %}
 
-  <style>
-    .mode-tabs {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 16px;
+<style>
+  :root {
+    --primary: #2c7be5;
+    --primary-dark: #1a5bb8;
+    --bg-page: #f4f6f8;
+    --bg-white: #ffffff;
+    --border: #e3ebf6;
+    --text-main: #12263f;
+    --text-muted: #95aac9;
+    --radius: 12px;
+    --shadow-card: 0 10px 40px -10px rgba(18, 38, 63, 0.1);
+  }
+
+  .full-screen-wrapper {
+    display: grid;
+    grid-template-columns: 1fr 520px;
+    width: 100%;
+    flex: 1;
+    background-color: var(--bg-page);
+    overflow: hidden;
+  }
+
+  @media (max-width: 950px) {
+    .full-screen-wrapper {
+      grid-template-columns: 1fr;
+      display: block;
+      height: auto;
+      overflow: visible;
     }
-
-    .mode-tab {
-      flex: 1;
-      text-decoration: none;
+    .sidebar-zone {
+      border-left: none !important;
+      border-top: 1px solid var(--border);
+      height: 600px;
     }
+  }
 
-    .mode-btn {
-      width: 100%;
-      padding: 8px 15px;
-      background-color: #2c7be5;   /* color normal */
-      border: none;
-      color: #fff;
-      cursor: pointer;
-      border-radius: 3px;
-      font-size: 14px;
-      font-weight: bold;
-    }
+  .main-zone {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+    overflow-y: auto;
+    height: 100%;
+  }
 
-    .mode-btn:hover {
-      background-color: #1a5bb8;
-    }
+  .form-card {
+    background: var(--bg-white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 40px;
+    box-shadow: var(--shadow-card);
+    width: 100%;
+    max-width: 520px;
+  }
 
-    .mode-btn.active {
-      background-color: #1a5bb8; /* pestaña activa */
-    }
-  </style>
+  .card-title {
+    font-size: 1.5rem;
+    font-weight: 800;
+    margin: 5px 0 25px 0;
+    color: var(--text-main);
+    text-align: center;
+  }
 
-  <!-- BOTONES DE MODO -->
-  <div class="mode-tabs">
-    <a class="mode-tab" href="?mode=checkin">
-      <button
-        type="button"
-        class="mode-btn {% if mode == 'checkin' %}active{% endif %}">
-        Registro
-      </button>
-    </a>
+  .sidebar-zone {
+    background: var(--bg-white);
+    border-left: 1px solid var(--border);
+    padding: 25px;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+  }
 
-    <a class="mode-tab" href="?mode=charge">
-      <button
-        type="button"
-        class="mode-btn {% if mode == 'charge' %}active{% endif %}">
-        Cobro
-      </button>
-    </a>
+  .clock-wrapper {
+    text-align: center;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 15px;
+    flex-shrink: 0;
+  }
+
+  .live-date {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: capitalize;
+    margin-bottom: 5px;
+  }
+
+  .live-time {
+    font-size: 3rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: var(--primary);
+    letter-spacing: -1.5px;
+    line-height: 1;
+  }
+
+  .history-list {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding-right: 5px;
+  }
+  .history-list::-webkit-scrollbar { width: 6px; }
+  .history-list::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+
+  .sidebar-header {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    font-weight: 800;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+    display: block;
+  }
+
+  /* ==============================
+     ✅ NUEVO: Tabs Sidebar
+     ============================== */
+  .sidebar-tabs{
+    display:flex;
+    gap:12px;
+    margin-bottom: 10px;
+    align-items: flex-end;
+  }
+  .sidebar-tab{
+    font-size: .8rem;
+    text-transform: uppercase;
+    font-weight: 900;
+    color: var(--text-muted);
+    text-decoration:none;
+    cursor:pointer;
+    border-bottom: 2px solid transparent;
+    padding-bottom: 4px;
+  }
+  .sidebar-tab:hover{ color: var(--primary); }
+  .sidebar-tab.active{
+    color: var(--primary);
+    border-color: var(--primary);
+  }
+
+  .sidebar-panel{ display:none; }
+  .sidebar-panel.active{ display:block; }
+
+  .pending-search { margin-bottom: 10px; }
+  .pending-search input{
+    width:100%;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: .85rem;
+    background:#fff;
+  }
+
+  /* ✅ PENDIENTES: contenedor que muestra aprox 3 items y deja scroll */
+  .scroll-3{
+    max-height: 240px; /* ~3 filas visibles (ajusta si tu fila es más alta/baja) */
+    overflow-y:auto;
+    padding-right: 5px;
+  }
+  .scroll-3::-webkit-scrollbar { width: 6px; }
+  .scroll-3::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+
+  /* ✅ Vehículos Activos: contenedor que muestra aprox 4 items y deja scroll */
+  .scroll-4{
+    max-height: 320px; /* ajusta si quieres más/menos alto */
+    overflow-y:auto;
+    padding-right: 5px;
+  }
+  .scroll-4::-webkit-scrollbar { width: 6px; }
+  .scroll-4::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+
+  /* ==============================
+     MENÚ tipo "panel"
+     ============================== */
+  .menu-title{
+    font-size: 2rem;
+    font-weight: 900;
+    text-align:center;
+    color: var(--text-main);
+    margin: 0 0 8px 0;
+  }
+  .menu-subtitle{
+    text-align:center;
+    color: var(--text-muted);
+    font-weight: 700;
+    margin: 0 0 22px 0;
+  }
+
+  .menu-grid{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .menu-card {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 16px;
+    text-align: center;
+    color: var(--text-main);
+    text-decoration: none;
+    transition: 0.2s;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 150px;
+  }
+  .menu-card:hover {
+    transform: translateY(-3px);
+    border-color: #cfe0f6;
+    box-shadow: 0 10px 28px -18px rgba(18, 38, 63, 0.25);
+  }
+  .icon-big { font-size: 2.2rem; margin-bottom: 10px; line-height: 1; }
+  .title-card { font-weight: 900; font-size: 1.05rem; }
+  .desc-card { font-size: 0.9rem; color: var(--text-muted); margin-top: 6px; font-weight: 700; }
+
+  /* Tarjeta que ocupa todo el ancho (como en el ejemplo) */
+  .menu-card.span-2{ grid-column: 1 / -1; }
+
+  @media (max-width: 620px){
+    .menu-grid{ grid-template-columns: 1fr; }
+    .menu-card.span-2{ grid-column:auto; }
+  }
+
+  /* Back link (pestañas) */
+  .back-link {
+    display: inline-block;
+    margin-bottom: 14px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-weight: 800;
+  }
+  .back-link:hover { color: var(--primary); }
+
+  /* Panel blanco contenedor (open) */
+  .panel{
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 10px 30px -18px rgba(18,38,63,0.12);
+  }
+
+  /* Tabla / listados */
+  .table-wrap { overflow-x: auto; }
+  table.simple { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  table.simple td { padding: 10px 0; border-bottom: 1px solid #f1f4f8; vertical-align: middle; }
+
+  /* Chips de estado */
+  .status-pill {
+    display:inline-block;
+    padding:2px 8px;
+    border-radius:999px;
+    font-size:.72rem;
+    font-weight:900;
+    border:1px solid var(--border);
+    background:#f8f9fa;
+    color:var(--text-muted);
+    text-transform:uppercase;
+    margin-left:8px;
+  }
+  .status-pill.active { background:#eaf3ff; border-color:#d6e6ff; color:var(--primary-dark); }
+  .status-pill.pending { background:#fff7e6; border-color:#ffe6b8; color:#b7791f; }
+  .status-pill.paid { background:#eafaf1; border-color:#c7f2d9; color:#1f7a45; }
+
+  /* ✅ NUEVO: estado “CRÉDITO” para asignados a empresa */
+  .status-pill.credit { background:#f3e8ff; border-color:#e9d5ff; color:#6b21a8; }
+
+  .subline { font-size:0.85rem; color: var(--text-muted); }
+
+  .btn-mini {
+    width: auto; padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; font-weight: 800;
+    border: 1px solid var(--primary); background: transparent; color: var(--primary); text-decoration: none;
+    display:inline-flex; align-items:center; justify-content:center;
+    white-space: nowrap;
+  }
+  .btn-mini:hover { background: var(--primary); color: #fff; }
+
+  /* Form */
+  form p { margin-bottom: 15px; }
+  form label { font-size: 0.9rem; font-weight: 700; margin-bottom: 6px; display: block; color: var(--text-main); }
+  input[type="text"], input[type="number"], input[type="email"], select {
+    width: 100%; padding: 10px 12px; border: 1px solid #d2ddec; border-radius: 8px; font-size: 1rem;
+    background-color: #fff; max-width: 100%;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(44, 123, 229, 0.1); }
+
+  .form-actions {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-top: 15px;
+  }
+
+  .submit-btn {
+    flex: 1; padding: 12px; border-radius: 10px; border: none; font-size: 1rem; font-weight: 700;
+    background: var(--primary); color: white; cursor: pointer; transition: 0.2s;
+  }
+  .submit-btn:hover { background: var(--primary-dark); }
+  .disabled-btn { background: #e3ebf6; color: #95aac9; cursor: not-allowed; flex: 1; padding: 12px; border-radius:10px; border:none; font-weight:700;}
+
+  .dynamic-price {
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: #28a745;
+    white-space: nowrap;
+    display: none;
+    min-width: 120px;
+    text-align: right;
+  }
+
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+
+  .mini-btn {
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    background: transparent;
+    border: 1px solid var(--primary);
+    color: var(--primary);
+    padding: 4px 10px;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    font-weight: 800;
+    cursor: pointer;
+    text-decoration:none;
+    line-height:1.2;
+    white-space: nowrap;
+    min-width: 92px;
+  }
+  .mini-btn:hover { background: var(--primary); color: white; }
+  .mini-btn.disabled { opacity: .45; cursor: not-allowed; pointer-events: none; }
+
+  .result-box { background: #f8fbff; border: 1px dashed var(--primary); padding: 15px; border-radius: 8px; margin-top: auto; flex-shrink: 0; }
+
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+
+  .input-error { border-color: #dc3545 !important; background-color: #fff8f8; }
+  .error-msg { color: #dc3545; font-size: 0.8rem; font-weight: bold; display: none; margin-top: 4px; }
+
+  .hint-chip {
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    font-size:0.78rem;
+    font-weight:800;
+    padding:4px 10px;
+    border-radius:999px;
+    border:1px solid var(--border);
+    background:#f8f9fa;
+    color:var(--text-muted);
+    margin-top:8px;
+  }
+  .hint-chip.ok { background:#eafaf1; border-color:#c7f2d9; color:#1f7a45; }
+  .hint-chip.warn { background:#fff7e6; border-color:#ffe6b8; color:#b7791f; }
+  .pending-count{
+    font-weight: 900;
+    margin-left: 6px;
+  }
+  .pending-count.has-pending{
+    color: #dc3545; /* rojo */
+  }
+    /* ==============================
+    ✅ SOLO: Últimas transacciones + Pagos pendientes
+    (no afecta reloj, menú, forms, etc.)
+    ============================== */
+
+  /* Tabs "Últimas 3 transacciones" / "Pagos pendientes" */
+  .sidebar-zone .history-list .sidebar-tabs .sidebar-tab{
+    font-size: 0.9rem;   /* antes 0.8rem */
+  }
+
+  /* Contenido dentro de los 2 tabs */
+  .sidebar-zone .history-list #tab-last,
+  .sidebar-zone .history-list #tab-pending{
+    font-size: 0.95rem;  /* sube el tamaño del texto del listado */
+  }
+
+  /* Ajustes finos: placa y líneas secundarias */
+  .sidebar-zone .history-list #tab-last .subline,
+  .sidebar-zone .history-list #tab-pending .subline{
+    font-size: 0.9rem;   /* antes 0.85rem */
+    line-height: 1.35;
+  }
+  /* Chips ACTIVO / PENDIENTE / PAGADO / CRÉDITO */
+  .sidebar-zone .history-list #tab-last .status-pill,
+  .sidebar-zone .history-list #tab-pending .status-pill{
+    font-size: 0.78rem;  /* antes 0.72rem */
+    padding: 3px 9px;
+  }
+  /* Botones "Editar" / "Pagar" dentro de ese bloque */
+  .sidebar-zone .history-list #tab-last .mini-btn,
+  .sidebar-zone .history-list #tab-pending .mini-btn{
+    font-size: 0.95rem;  /* antes 0.9rem */
+  }
+
+</style>
+
+<div class="full-screen-wrapper">
+
+  <div class="main-zone">
+    <div class="form-card">
+
+      {% if not mode or mode == "menu" %}
+        <div class="menu-title">Panel Operario</div>
+        <div class="menu-subtitle">Selecciona una opción</div>
+
+        <div class="menu-grid">
+          <a href="?mode=checkin" class="menu-card">
+            <span class="icon-big">📝</span>
+            <span class="title-card">Registro</span>
+            <span class="desc-card">Nuevo ingreso</span>
+          </a>
+
+          <a href="?mode=charge" class="menu-card">
+            <span class="icon-big">💳</span>
+            <span class="title-card">Pagos</span>
+            <span class="desc-card">Cobro / salida</span>
+          </a>
+
+          <a href="?mode=inspect" class="menu-card">
+            <span class="icon-big">🔎</span>
+            <span class="title-card">Inspeccionar</span>
+            <span class="desc-card">Consultar tiempo</span>
+          </a>
+
+          <a href="?mode=open" class="menu-card">
+            <span class="icon-big">🚗</span>
+            <span class="title-card">Vehículos Activos</span>
+            <span class="desc-card">Ver listado</span>
+          </a>
+        </div>
+      {% endif %}
+
+      {% if mode == "checkin" %}
+        <a href="?mode=menu" class="back-link">← Volver al Menú</a>
+
+        <form method="post" id="checkinForm">
+          <div class="card-title">Nuevo Ingreso</div>
+          {% csrf_token %}
+
+          <p>
+            {{ checkin_form.plate.label_tag }}
+            {{ checkin_form.plate }}
+            <small id="plateHintIn" style="color:var(--text-muted); display:block; margin-top:6px;">
+              Digita la placa y valida (Enter o salir del campo) para verificar disponibilidad.
+            </small>
+            <small id="plateErrorIn" style="color:#dc3545; display:none; margin-top:6px; font-weight:700;">
+              La placa debe ser alfanumérica (A-Z, 0-9) y de 3 a 12 caracteres.
+            </small>
+            <small id="plateErrorActive" style="color:#dc3545; display:none; margin-top:6px; font-weight:700;">
+              ⛔ El vehículo ya se encuentra dentro del parqueadero.
+            </small>
+          </p>
+
+          <div id="checkinGateBlock" style="display:none;">
+            <p>
+              {{ checkin_form.vehicle_type.label_tag }}
+              {{ checkin_form.vehicle_type }}
+            </p>
+            <p>
+              {{ checkin_form.client_kind.label_tag }}
+              {{ checkin_form.client_kind }}
+            </p>
+
+            <div class="form-actions">
+              <button type="submit" id="checkinSubmit" class="disabled-btn" disabled>Registrar ingreso</button>
+            </div>
+          </div>
+        </form>
+      {% endif %}
+
+      {% if mode == "charge" %}
+        <a href="?mode=menu" class="back-link">← Volver al Menú</a>
+
+        <form method="post" id="closeForm">
+          <div class="card-title">Procesar Salida</div>
+          {% csrf_token %}
+
+          <p>
+            {{ close_form.plate.label_tag }}
+            {{ close_form.plate }}
+            <small style="color:var(--text-muted); display:block; margin-top:6px;">
+              Digita la placa y valida (Enter o salir del campo) para habilitar las opciones de pago.
+            </small>
+            <small id="plateErrorClose" style="color:#dc3545; display:none; margin-top:6px; font-weight:700;">
+              Placa no encontrada (sin ticket activo o pendiente).
+            </small>
+            <small id="plateErrorCloseFormat" style="color:#dc3545; display:none; margin-top:6px; font-weight:700;">
+              La placa debe ser alfanumérica (A-Z, 0-9) y de 3 a 12 caracteres.
+            </small>
+          </p>
+
+          <div id="paymentGateBlock" style="display:none;">
+            <p>
+              {{ close_form.method.label_tag }}
+              {{ close_form.method }}
+            </p>
+
+            <p id="transferRow">
+              {{ close_form.transfer_ref.label_tag }}
+              {{ close_form.transfer_ref }}
+            </p>
+
+            <p id="companyRow">
+              {{ close_form.company.label_tag }}
+              {{ close_form.company }}
+            </p>
+
+            <p id="invoiceRow">
+              {{ close_form.invoice_required.label_tag }}
+              {{ close_form.invoice_required }}
+            </p>
+
+            <p id="idRow">
+              {{ close_form.id_number.label_tag }}
+              {{ close_form.id_number }}
+              <span id="customerHint" class="hint-chip" style="display:none;"></span>
+            </p>
+
+            <p id="nameRow">
+              {{ close_form.full_name.label_tag }}
+              {{ close_form.full_name }}
+            </p>
+
+            <p id="emailRow">
+              {{ close_form.email.label_tag }}
+              {{ close_form.email }}
+              <span id="emailError" class="error-msg">Ingresa un correo válido (ej: usuario@dominio.com)</span>
+            </p>
+
+            <p id="workTypeRow">
+              {{ close_form.work_type.label_tag }}
+              {{ close_form.work_type }}
+            </p>
+
+            <p id="workAmountRow">
+              {{ close_form.work_amount_cop.label_tag }}
+              {{ close_form.work_amount_cop }}
+            </p>
+
+            <div class="form-actions">
+              <button type="submit" id="closeSubmit" class="disabled-btn" disabled>Procesar pago</button>
+              <div id="priceDisplay" class="dynamic-price"></div>
+            </div>
+          </div>
+        </form>
+      {% endif %}
+
+      {% if mode == "inspect" %}
+        <a href="?mode=menu" class="back-link">← Volver al Menú</a>
+
+        <form method="post" id="inspectForm">
+          <div class="card-title">Consultar Vehículo</div>
+          {% csrf_token %}
+          {{ inspect_form.as_p }}
+          <div class="form-actions">
+            <button type="submit" id="inspectSubmit" class="disabled-btn" disabled>Buscar</button>
+          </div>
+        </form>
+      {% endif %}
+
+      {% if mode == "open" %}
+        <a href="?mode=menu" class="back-link">← Volver al Menú</a>
+        <div class="card-title" style="margin-top:0;">Vehículos Activos</div>
+
+        {# ✅ NUEVO: Botón imprimir activos #}
+        <div style="display:flex; justify-content:center; margin: 0 0 14px 0;">
+          <a href="{% url 'parking:active_vehicles_report' %}?next={{ request.get_full_path|urlencode }}"
+             style="text-decoration:none; width:100%; max-width:320px;">
+            <button type="button" class="submit-btn" style="width:100%;">
+              🧾 Imprimir activos
+            </button>
+          </a>
+        </div>
+
+        <div class="panel" style="padding:0; overflow:hidden;">
+          <div style="padding:15px; border-bottom:1px solid #f1f4f8; font-weight:800; color:var(--text-muted); font-size:0.85rem; background:#f8f9fa;">
+            LISTADO ({{ open_tickets|length }})
+          </div>
+
+          {% if open_tickets %}
+            {# ✅ AJUSTE: SOLO 4 REGISTROS VISIBLES + SCROLL #}
+            <div class="scroll-4 table-wrap">
+              <table class="simple">
+                <tbody>
+                {% for t in open_tickets %}
+                  <tr>
+                    <td style="padding:15px;">
+                      <div style="font-weight:900; color:var(--text-main); font-size:1rem;">
+                        {{ t.plate }}
+                        <span class="status-pill active">ACTIVO</span>
+                      </div>
+                      <div class="subline">
+                        {{ t.vehicle_type.name }} • <span class="mono">{{ t.ui_checkin }}</span>
+                      </div>
+                    </td>
+
+                    {% if is_admin %}
+                      <td style="text-align:right; padding:15px; white-space:nowrap;">
+                        <a class="btn-mini" href="{% url 'parking:ticket_edit_active' t.id %}?next={{ request.get_full_path|urlencode }}">
+                          Editar
+                        </a>
+                      </td>
+                    {% else %}
+                      <td></td>
+                    {% endif %}
+                  </tr>
+                {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <div style="padding:40px 0; text-align:center; color:var(--text-muted); font-style:italic;">
+              No hay vehículos en el parqueadero.
+            </div>
+          {% endif %}
+        </div>
+      {% endif %}
+
+    </div>
   </div>
 
-  {% if messages %}
-    <ul style="padding-left:18px;">
-      {% for m in messages %}
-        <li>{{ m }}</li>
-      {% endfor %}
-    </ul>
-  {% endif %}
+  <div class="sidebar-zone">
+    <div class="clock-wrapper">
+      <div id="liveDate" class="live-date">--</div>
+      <div id="liveClock" class="live-time">--:-- --</div>
+    </div>
 
-  <!-- ===== REGISTRO ===== -->
-  {% if mode == "checkin" %}
-    <form method="post">
-      {% csrf_token %}
-      {{ checkin_form.as_p }}
-      <button type="submit" style="width:100%;">Registrar ingreso</button>
-    </form>
-  {% endif %}
+    <div class="history-list">
 
-  <!-- ===== COBRO ===== -->
-  {% if mode == "charge" %}
-    <form method="post">
-      {% csrf_token %}
-      {{ charge_form.as_p }}
-      <button type="submit" style="width:100%;">Cobrar y cerrar</button>
-    </form>
+      <!-- ✅ Tabs -->
+      <div class="sidebar-tabs">
+        <a href="#" class="sidebar-tab active" data-tab="last">Últimas 3 transacciones</a>
+        <a href="#" class="sidebar-tab" data-tab="pending">
+          Pagos pendientes
+        <span class="pending-count {% if pending_tickets|length > 0 %}has-pending{% endif %}">
+          ({{ pending_tickets|length }})
+        </span>
+        </a>
+      </div>
 
-    {% if amount %}
-      <div style="margin-top:12px; padding:10px; background:#f5f5f5; border:1px solid #ddd;">
-        <strong>Total:</strong> {{ amount }} COP
+      <!-- =======================
+           TAB: ÚLTIMAS TRANSACCIONES
+           ======================= -->
+      <div class="sidebar-panel active" id="tab-last">
+        {% if last_transactions %}
+          <table>
+            {% for t in last_transactions %}
+              <tr>
+                <td>
+                  <div style="font-weight:bold; color:var(--text-main);">
+                    {{ t.plate }}
+
+                    {% if t.status == "ACTIVE" %}
+                      <span class="status-pill active">ACTIVO</span>
+                    {% elif t.status == "PENDING" %}
+                      <span class="status-pill pending">PENDIENTE</span>
+                    {% elif t.status == "PAID" %}
+                      <span class="status-pill paid">PAGADO</span>
+                    {% elif t.status == "CREDIT" %}
+                      <span class="status-pill credit">CRÉDITO</span>
+                    {% elif t.payment_method == "CREDIT" or t.method == "CREDIT" or t.company %}
+                      <span class="status-pill credit">CRÉDITO</span>
+                    {% endif %}
+                  </div>
+
+                  <div class="subline">
+                    {{ t.vehicle_type.name }} • {{ t.get_client_kind_display }}
+                  </div>
+
+                  {% if t.status == "PAID" or t.status == "PENDING" or t.status == "CREDIT" or t.payment_method == "CREDIT" or t.method == "CREDIT" or t.company %}
+                    <div class="subline" style="margin-top:6px;">
+                      Parqueadero:
+                      <span class="mono">
+                        {% if t.parking_amount_ui %}
+                          ${{ t.parking_amount_ui }}
+                        {% else %}
+                          —
+                        {% endif %}
+                      </span>
+                      &nbsp;|&nbsp;
+                      Servicio:
+                      <span class="mono">
+                        {% if t.service_text_ui and t.service_amount_ui %}
+                          {{ t.service_text_ui }} (${{ t.service_amount_ui }})
+                        {% else %}
+                          —
+                        {% endif %}
+                      </span>
+                      &nbsp;|&nbsp;
+                      Total:
+                      <span class="mono">
+                        {% if t.total_amount_ui %}
+                          ${{ t.total_amount_ui }}
+                        {% else %}
+                          —
+                        {% endif %}
+                      </span>
+                    </div>
+
+                    {% if t.company %}
+                      <div class="subline" style="margin-top:6px;">
+                        Empresa: <b>{{ t.company.full_name|default:t.company }}</b>
+                      </div>
+                    {% endif %}
+                  {% endif %}
+                </td>
+
+                <td style="text-align:right; white-space:nowrap;">
+                  {% if t.status == "ACTIVE" %}
+                    <a class="mini-btn" href="{% url 'parking:ticket_edit_active' t.id %}">Editar</a>
+                  {% else %}
+                    <span class="subline">—</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </table>
+        {% else %}
+          <div style="padding:40px 0; text-align:center; color:var(--text-muted); font-style:italic;">
+            No hay transacciones recientes.
+          </div>
+        {% endif %}
+      </div>
+
+      <!-- =======================
+           TAB: PAGOS PENDIENTES (✅ SOLO 3 + SCROLL)
+           ======================= -->
+      <div class="sidebar-panel" id="tab-pending">
+
+        <div class="pending-search">
+          <input id="pendingSearchInput" type="text" placeholder="Buscar por placa…">
+        </div>
+
+        {# ✅ AJUSTE: SOLO 3 REGISTROS VISIBLES + SCROLL CON BARRA #}
+        <div class="scroll-3">
+          {% if pending_tickets %}
+            <table id="pendingTicketsTable">
+              {% for t in pending_tickets %}
+                <tr data-plate="{{ t.plate|default:'' }}">
+                  <td>
+                    <div style="font-weight:bold; color:var(--text-main);">
+                      {{ t.plate }}
+                      <span class="status-pill pending">PENDIENTE</span>
+                    </div>
+
+                    <div class="subline">
+                      {{ t.vehicle_type.name }} • {{ t.get_client_kind_display }}
+                    </div>
+                  </td>
+
+                  <td style="text-align:right; white-space:nowrap;">
+                    <a class="mini-btn" href="?mode=charge&plate={{ t.plate }}">Pagar</a>
+                  </td>
+                </tr>
+              {% endfor %}
+            </table>
+          {% else %}
+            <div style="padding:40px 0; text-align:center; color:var(--text-muted); font-style:italic;">
+              No hay pagos pendientes.
+            </div>
+          {% endif %}
+        </div>
+      </div>
+
+    </div>
+
+    {% if mode == "inspect" and inspect_info %}
+      <div class="result-box">
+        <h4 style="margin:0 0 10px 0; color:var(--primary);">Detalle de Inspección</h4>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; font-size:0.9rem;">
+          <div><small style="color:gray;">Placa</small><br><strong>{{ inspect_info.plate }}</strong></div>
+          <div><small style="color:gray;">Cliente</small><br><strong>{{ inspect_info.client_type }}</strong></div>
+          <div><small style="color:gray;">Ingreso</small><br><strong>{{ inspect_info.check_in|date:"h:i a" }}</strong></div>
+          <div><small style="color:gray;">Tiempo</small><br><strong>{{ inspect_info.elapsed_text }}</strong></div>
+          <div style="grid-column: span 2; border-top:1px solid #dae5f5; padding-top:8px; margin-top:5px; display:flex; justify-content:space-between; align-items:center;">
+            <span style="color:gray; font-size:0.95rem;">Valor actual:</span>
+            <strong style="color:var(--primary); font-size:1.2rem;">{{ inspect_info.current_cost }} COP</strong>
+          </div>
+        </div>
       </div>
     {% endif %}
-  {% endif %}
+
+    <div style="margin-top: auto; padding-top: 15px; border-top: 1px solid var(--border);">
+      {% if can_close %}
+        <form action="{% url 'parking:generate_closure' %}" method="POST" onsubmit="return confirm('¿Estás seguro de generar el CIERRE DE CAJA? Esto archivará las transacciones actuales.');">
+          {% csrf_token %}
+          <button type="submit" class="submit-btn" style="background-color: #12263f; width: 100%;">
+            🖨️ Generar Cierre de Caja
+          </button>
+        </form>
+      {% else %}
+        <button type="button" class="disabled-btn" disabled style="width: 100%; opacity: 0.6; cursor: not-allowed;">
+          ✔ Caja al día
+        </button>
+      {% endif %}
+    </div>
+
+
+  </div>
+</div>
+
+<script>
+  (function clock() {
+    const timeEl = document.getElementById("liveClock");
+    const dateEl = document.getElementById("liveDate");
+    function pad(n){ return String(n).padStart(2,"0"); }
+    function tick(){
+      const d = new Date();
+      let hours = d.getHours();
+      const ampm = hours >= 12 ? 'p.m.' : 'a.m.';
+      hours = hours % 12;
+      hours = hours ? hours : 12;
+      timeEl.textContent = `${hours}:${pad(d.getMinutes())}:${pad(d.getSeconds())} ${ampm}`;
+      const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+      let dateStr = d.toLocaleDateString('es-ES', options);
+      dateStr = dateStr.charAt(0).toUpperCase() + dateStr.slice(1);
+      dateEl.textContent = dateStr;
+    }
+    tick();
+    setInterval(tick, 1000);
+  })();
+
+  function setBtnState(btn, enabled) {
+    if (!btn) return;
+    btn.disabled = !enabled;
+    btn.classList.toggle("disabled-btn", !enabled);
+    btn.classList.toggle("submit-btn", enabled);
+  }
+  function show(el, yes){ if (el) el.style.display = yes ? "" : "none"; }
+  function normalizePlate(val){ return (val || "").trim().toUpperCase(); }
+  function isAlnumPlate(val){
+    const p = normalizePlate(val);
+    return /^[A-Z0-9]+$/.test(p) && p.length >= 3 && p.length <= 12;
+  }
+
+  // REGISTRO
+  (function setupCheckin(){
+    const form = document.getElementById("checkinForm");
+    if (!form) return;
+
+    const submitBtn = document.getElementById("checkinSubmit");
+    const plateInput = form.querySelector('#id_plate');
+    const vtype = form.querySelector('#id_vehicle_type');
+    const ckind = form.querySelector('#id_client_kind');
+    const gate = document.getElementById("checkinGateBlock");
+    const plateErrorFormat = document.getElementById("plateErrorIn");
+    const plateErrorActive = document.getElementById("plateErrorActive");
+    if (plateInput) {
+      plateInput.addEventListener('input', () => {
+        const up = normalizePlate(plateInput.value);
+        if (plateInput.value !== up) plateInput.value = up;
+      });
+}
+
+    if (vtype) vtype.value = "";
+    if (ckind) ckind.value = "";
+    show(gate, false);
+
+    async function validatePlateAvailability() {
+        const p = normalizePlate(plateInput?.value || "");
+
+        if (!isAlnumPlate(p)) {
+            show(gate, false);
+            show(plateErrorActive, false);
+            show(plateErrorFormat, p.length > 0);
+            setBtnState(submitBtn, false);
+            return;
+        }
+        show(plateErrorFormat, false);
+
+        try {
+            const response = await fetch(`?mode=quote&plate=${encodeURIComponent(p)}`, {
+                headers: {'X-Requested-With': 'XMLHttpRequest'}
+            });
+            const data = await response.json();
+
+            if (data && data.success) {
+                show(plateErrorActive, true);
+                show(gate, false);
+                setBtnState(submitBtn, false);
+            } else {
+                show(plateErrorActive, false);
+                show(gate, true);
+                checkFullFormValidity();
+            }
+
+        } catch (err) {
+            console.error("Error verificando placa", err);
+            show(plateErrorActive, false);
+            show(gate, true);
+            checkFullFormValidity();
+        }
+    }
+
+    function checkFullFormValidity(){
+      const vt = vtype?.value || "";
+      const ck = ckind?.value || "";
+      const isGateVisible = gate.style.display !== "none";
+      setBtnState(submitBtn, isGateVisible && vt.length > 0 && ck.length > 0);
+    }
+
+    if (plateInput) {
+        plateInput.addEventListener('blur', validatePlateAvailability);
+        plateInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                validatePlateAvailability();
+            }
+        });
+        plateInput.addEventListener('input', () => {
+            show(gate, false);
+            show(plateErrorActive, false);
+            show(plateErrorFormat, false);
+            setBtnState(submitBtn, false);
+        });
+    }
+
+    form.addEventListener("change", checkFullFormValidity);
+  })();
+
+  // INSPECCIÓN
+  // INSPECCIÓN
+  (function setupInspect(){
+      const form = document.getElementById("inspectForm");
+      if (!form) return;
+
+      const submitBtn = document.getElementById("inspectSubmit");
+      const plate = form.querySelector('#id_plate');
+
+      // ✅ NUEVO: placa siempre en MAYÚSCULA mientras escribe
+      if (plate) {
+        plate.addEventListener('input', () => {
+          const up = normalizePlate(plate.value);
+          if (plate.value !== up) plate.value = up;
+        });
+      }
+
+      function valid(){ return (plate?.value || "").trim().length > 0; }
+      setBtnState(submitBtn, valid());
+      form.addEventListener("input", () => setBtnState(submitBtn, valid()));
+    })();
+
+
+  // PAGOS (AJUSTADO: PENDING usa solo método (sin crédito) + factura electrónica)
+  (function setupCloseForm(){
+    const form = document.getElementById("closeForm");
+    if (!form) return;
+
+    const submitBtn = document.getElementById("closeSubmit");
+    const plateInput = form.querySelector('#id_plate');
+    const priceDisplay = document.getElementById('priceDisplay');
+    const plateError = document.getElementById("plateErrorClose");
+    const plateErrorFmt = document.getElementById("plateErrorCloseFormat");
+    const paymentGateBlock = document.getElementById("paymentGateBlock");
+
+    const method = form.querySelector('#id_method');
+    const transferInput = form.querySelector('#id_transfer_ref');
+    const companyInput = form.querySelector('#id_company');
+    const invoice = form.querySelector('#id_invoice_required');
+    const idInput = form.querySelector('#id_id_number');
+    const nameInput = form.querySelector('#id_full_name');
+    const emailInput = form.querySelector('#id_email');
+
+    const transferRow = document.getElementById("transferRow");
+    const companyRow = document.getElementById("companyRow");
+    const invoiceRow = document.getElementById("invoiceRow");
+    const idRow = document.getElementById("idRow");
+    const nameRow = document.getElementById("nameRow");
+    const emailRow = document.getElementById("emailRow");
+    const emailError = document.getElementById("emailError");
+    const customerHint = document.getElementById("customerHint");
+
+    const workType = form.querySelector('#id_work_type');
+    const workAmount = form.querySelector('#id_work_amount_cop');
+    const workTypeRow = document.getElementById("workTypeRow");
+    const workAmountRow = document.getElementById("workAmountRow");
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    let plateExists = false;
+    let isPendingTicket = false;
+    if (plateInput) {
+        plateInput.addEventListener('input', () => {
+          const up = normalizePlate(plateInput.value);
+          if (plateInput.value !== up) plateInput.value = up;
+        });
+      }
+
+    // Guardamos opciones originales del select de método para poder restaurar
+    const originalMethodOptions = (method && method.options)
+      ? Array.from(method.options).map(o => ({value: o.value, text: o.text}))
+      : [];
+
+    function rebuildMethodOptions(allowedValues){
+      if (!method || !originalMethodOptions.length) return;
+      const cur = method.value || "";
+
+      method.innerHTML = "";
+      originalMethodOptions.forEach(opt => {
+        if (!opt.value || allowedValues.includes(opt.value)) {
+          const o = document.createElement("option");
+          o.value = opt.value;
+          o.textContent = opt.text;
+          method.appendChild(o);
+        }
+      });
+
+      // intenta mantener selección si sigue permitida
+      const stillAllowed = allowedValues.includes(cur);
+      method.value = stillAllowed ? cur : "";
+    }
+
+    function setHint(kind, text){
+      if (!customerHint) return;
+      customerHint.style.display = text ? "" : "none";
+      customerHint.className = "hint-chip" + (kind ? (" " + kind) : "");
+      customerHint.textContent = text || "";
+    }
+
+    function showServiceFields(yes){
+      show(workTypeRow, yes);
+      show(workAmountRow, yes);
+    }
+
+    function clearCustomerFields(){
+      if (nameInput) nameInput.value = "";
+      if (emailInput) emailInput.value = "";
+      if (emailInput) emailInput.classList.remove("input-error");
+      if (emailError) emailError.style.display = "none";
+    }
+
+    let verifiedCustomerId = "";
+    let customerFound = false;
+
+    function invalidateCustomer(reasonText){
+      customerFound = false;
+      verifiedCustomerId = "";
+      clearCustomerFields();
+      if (reasonText) setHint("warn", reasonText);
+      applyInvoiceCustomerUI();
+    }
+
+    // Reset inicial (sin romper)
+    if (method) method.value = "";
+    if (invoice) invoice.value = "";
+    if (companyInput) companyInput.value = "";
+    if (transferInput) transferInput.value = "";
+    if (workType) workType.value = "";
+    if (workAmount) workAmount.value = "";
+    if (workAmount) workAmount.disabled = true;
+    show(workAmountRow, false);
+
+    show(paymentGateBlock, false);
+    if (priceDisplay) priceDisplay.style.display = "none";
+    show(plateError, false);
+    show(plateErrorFmt, false);
+    setBtnState(submitBtn, false);
+
+    if (idInput) {
+      idInput.addEventListener('input', function() {
+        this.value = this.value.replace(/[^0-9]/g, '');
+        const cur = (this.value || "").trim();
+
+        if (!verifiedCustomerId || cur !== verifiedCustomerId) {
+          invalidateCustomer(cur.length ? "Cédula/NIT cambió: vuelve a verificar (sal del campo)" : "");
+        } else {
+          applyInvoiceCustomerUI();
+        }
+        setBtnState(submitBtn, basicValid());
+      });
+
+      idInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); idInput.blur(); }
+      });
+
+      idInput.addEventListener('blur', async function() {
+        const m = method ? (method.value || "") : "";
+        const inv = invoice ? (invoice.value || "") : "";
+        const val = (this.value || "").trim();
+
+        if (!(m === "CASH" || m === "TRANSFER")) return;
+        if (inv !== "YES") return;
+
+        if (!val) {
+          invalidateCustomer("");
+          setBtnState(submitBtn, basicValid());
+          return;
+        }
+
+        setHint("", "Buscando cliente...");
+
+        try {
+          const response = await fetch(`?mode=lookup_customer&id=${encodeURIComponent(val)}`);
+          const data = await response.json();
+
+          if (((idInput.value || "").trim()) !== val) return;
+
+          if (data && data.found) {
+            customerFound = true;
+            verifiedCustomerId = val;
+            if (nameInput) nameInput.value = data.full_name || "";
+            if (emailInput) emailInput.value = data.email || "";
+            setHint("ok", "Cliente encontrado ✓");
+          } else {
+            customerFound = false;
+            verifiedCustomerId = "";
+            clearCustomerFields();
+            setHint("warn", "Cliente no existe: completa nombre y correo");
+          }
+        } catch (err) {
+          customerFound = false;
+          verifiedCustomerId = "";
+          clearCustomerFields();
+          setHint("warn", "Error buscando cliente. Completa nombre y correo");
+          console.error("Error buscando cliente", err);
+        }
+
+        applyInvoiceCustomerUI();
+        if (emailInput) emailInput.dispatchEvent(new Event('input'));
+        setBtnState(submitBtn, basicValid());
+      });
+    }
+
+    if(emailInput) {
+      emailInput.addEventListener('input', function() {
+        const val = this.value.trim();
+        const emailVisible = emailRow && emailRow.style.display !== "none";
+        if (!emailVisible) {
+          this.classList.remove("input-error");
+          if(emailError) emailError.style.display = "none";
+          setBtnState(submitBtn, basicValid());
+          return;
+        }
+        if (val.length > 0) {
+          if(!emailRegex.test(val)) {
+            this.classList.add("input-error");
+            if(emailError) emailError.style.display = "block";
+          } else {
+            this.classList.remove("input-error");
+            if(emailError) emailError.style.display = "none";
+          }
+        } else {
+          this.classList.remove("input-error");
+          if(emailError) emailError.style.display = "none";
+        }
+        setBtnState(submitBtn, basicValid());
+      });
+    }
+
+    if(nameInput) nameInput.addEventListener('input', () => setBtnState(submitBtn, basicValid()));
+
+    function workUI(){
+      if (!workType || !workAmount) return;
+      const wt = (workType.value || "").trim();
+      if (!wt) {
+        workAmount.disabled = true;
+        workAmount.value = "";
+        show(workAmountRow, false);
+        return;
+      }
+      const enableAmount = (wt !== "NONE");
+      workAmount.disabled = !enableAmount;
+      if (!enableAmount) workAmount.value = "";
+      show(workAmountRow, enableAmount);
+    }
+
+    if (workType) {
+      workType.addEventListener("change", () => {
+        workUI();
+        setBtnState(submitBtn, basicValid());
+      });
+    }
+
+    async function fetchQuoteAndExistence() {
+      const plate = normalizePlate(plateInput?.value || "");
+      plateExists = false;
+      isPendingTicket = false;
+
+      show(plateError, false);
+      show(plateErrorFmt, false);
+      show(paymentGateBlock, false);
+      setBtnState(submitBtn, false);
+      if (priceDisplay) priceDisplay.style.display = "none";
+
+      if (!isAlnumPlate(plate)) {
+        if (plate.length > 0) show(plateErrorFmt, true);
+        return;
+      }
+
+      try {
+        const response = await fetch(`?mode=quote&plate=${encodeURIComponent(plate)}`, {
+          headers: {'X-Requested-With': 'XMLHttpRequest'}
+        });
+        const data = await response.json();
+
+        if (data && data.success) {
+          plateExists = true;
+
+          // ✅ detecta PENDIENTE según el backend (plan: "Pendiente")
+          isPendingTicket = (String(data.plan || "").toLowerCase() === "pendiente");
+
+          show(paymentGateBlock, true);
+          if (priceDisplay) {
+            priceDisplay.textContent = `${data.amount} COP`;
+            priceDisplay.style.display = 'block';
+          }
+
+          applyUI();
+          workUI();
+
+        } else {
+          plateExists = false;
+          isPendingTicket = false;
+          show(paymentGateBlock, false);
+          show(plateError, true);
+        }
+      } catch (err) {
+        plateExists = false;
+        isPendingTicket = false;
+        show(paymentGateBlock, false);
+        show(plateError, true);
+      }
+      setBtnState(submitBtn, basicValid());
+    }
+
+    if (plateInput) {
+      plateInput.addEventListener('blur', fetchQuoteAndExistence);
+      plateInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); fetchQuoteAndExistence(); }
+      });
+      plateInput.addEventListener('input', () => {
+        plateExists = false;
+        isPendingTicket = false;
+
+        show(plateError, false);
+        show(plateErrorFmt, false);
+        show(paymentGateBlock, false);
+        if (priceDisplay) priceDisplay.style.display = "none";
+        setBtnState(submitBtn, false);
+
+        if (idInput) idInput.value = "";
+        invalidateCustomer("");
+      });
+    }
+
+    function applyInvoiceCustomerUI(){
+      const m = method ? (method.value || "") : "";
+      const inv = invoice ? (invoice.value || "") : "";
+      const invoiceAllowed = (m === "CASH" || m === "TRANSFER");
+
+      if (!invoiceAllowed || inv !== "YES") {
+        show(nameRow, false);
+        show(emailRow, false);
+        setHint("", "");
+        return;
+      }
+
+      const idVal = (idInput?.value || "").trim();
+      if (!idVal) {
+        show(nameRow, false);
+        show(emailRow, false);
+        setHint("", "");
+        return;
+      }
+
+      const isValidFound = (customerFound && verifiedCustomerId && idVal === verifiedCustomerId);
+
+      if (isValidFound) {
+        show(nameRow, false);
+        show(emailRow, false);
+        if (emailInput) emailInput.classList.remove("input-error");
+        if (emailError) emailError.style.display = "none";
+      } else {
+        show(nameRow, true);
+        show(emailRow, true);
+        if (!customerHint || customerHint.style.display === "none") {
+          setHint("warn", "Completa nombre y correo o verifica cédula/NIT");
+        }
+      }
+    }
+
+    function basicValid(){
+      const plateVal = normalizePlate(plateInput?.value || "");
+      if (!isAlnumPlate(plateVal)) return false;
+      if (!plateExists) return false;
+
+      const m = method ? (method.value || "") : "";
+      if (!m) return false;
+
+      // ✅ PENDING: solo CASH/TRANSFER (no crédito) y NO pedir servicio/empresa
+      if (isPendingTicket) {
+        if (!(m === "CASH" || m === "TRANSFER")) return false;
+
+        if (m === "TRANSFER") {
+          if ((transferInput?.value || "").trim().length === 0) return false;
+        }
+
+        // Factura electrónica sigue aplicando
+        const inv = invoice ? (invoice.value || "") : "";
+        if (!inv) return false;
+
+        if (inv === "YES") {
+          const idVal = (idInput?.value || "").trim();
+          if (!idVal) return false;
+
+          const isValidFound = (customerFound && verifiedCustomerId && idVal === verifiedCustomerId);
+
+          if (!isValidFound) {
+            if ((nameInput?.value || "").trim().length === 0) return false;
+            const mailVal = (emailInput?.value || "").trim();
+            if (mailVal.length === 0) return false;
+            if (!emailRegex.test(mailVal)) return false;
+          }
+        }
+        return true;
+      }
+
+      // ✅ ACTIVE (comportamiento original)
+      if (m === "TRANSFER") {
+        if ((transferInput?.value || "").trim().length === 0) return false;
+      }
+
+      if (m === "CREDIT") {
+        if (!(companyInput && companyInput.value)) return false;
+      }
+
+      if (m === "CASH" || m === "TRANSFER") {
+        const inv = invoice ? (invoice.value || "") : "";
+        if (!inv) return false;
+
+        if (inv === "YES") {
+          const idVal = (idInput?.value || "").trim();
+          if (!idVal) return false;
+
+          const isValidFound = (customerFound && verifiedCustomerId && idVal === verifiedCustomerId);
+
+          if (!isValidFound) {
+            if ((nameInput?.value || "").trim().length === 0) return false;
+            const mailVal = (emailInput?.value || "").trim();
+            if (mailVal.length === 0) return false;
+            if (!emailRegex.test(mailVal)) return false;
+          }
+        }
+      }
+
+      const wt = (workType?.value || "").trim();
+      if (!wt) return false;
+
+      if (wt !== "NONE") {
+        const val = parseInt((workAmount?.value || "").trim(), 10);
+        if (!val || val <= 0) return false;
+      }
+
+      return true;
+    }
+
+    function applyUI(){
+      const m = method ? (method.value || "") : "";
+
+      // ✅ Si es PENDING: quitar opción crédito y ocultar empresa/servicio
+      if (isPendingTicket) {
+        rebuildMethodOptions(["CASH","TRANSFER"]);
+        const mm = method ? (method.value || "") : "";
+
+        show(companyRow, false);
+        if (companyInput) companyInput.value = "";
+
+        showServiceFields(false); // no pedir servicio aquí
+
+        show(transferRow, mm === "TRANSFER");
+
+        // factura electrónica sí aplica para CASH/TRANSFER
+        const invoiceAllowed = (mm === "CASH" || mm === "TRANSFER");
+        show(invoiceRow, invoiceAllowed);
+
+        if (!invoiceAllowed) {
+          if (invoice) invoice.value = "";
+          show(idRow, false);
+          show(nameRow, false);
+          show(emailRow, false);
+          if (idInput) idInput.value = "";
+          invalidateCustomer("");
+        } else {
+          const inv = invoice ? (invoice.value || "") : "";
+          show(idRow, inv === "YES");
+
+          if (inv !== "YES") {
+            show(nameRow, false);
+            show(emailRow, false);
+            if (idInput) idInput.value = "";
+            invalidateCustomer("");
+          } else {
+            const cur = (idInput?.value || "").trim();
+            if (cur && (!verifiedCustomerId || cur !== verifiedCustomerId)) {
+              customerFound = false;
+              verifiedCustomerId = "";
+              clearCustomerFields();
+              setHint("warn", "Verifica la cédula/NIT (sal del campo) o completa nombre y correo");
+            }
+            applyInvoiceCustomerUI();
+          }
+        }
+
+        setBtnState(submitBtn, basicValid());
+        return;
+      }
+
+      // ✅ Si NO es pending: restaurar opciones completas y UI original
+      rebuildMethodOptions(originalMethodOptions.filter(o => o.value).map(o => o.value));
+
+      show(transferRow, m === "TRANSFER");
+      show(companyRow, m === "CREDIT");
+
+      // Servicio visible en ACTIVE
+      showServiceFields(true);
+
+      const invoiceAllowed = (m === "CASH" || m === "TRANSFER");
+      show(invoiceRow, invoiceAllowed);
+
+      if (!invoiceAllowed) {
+        if (invoice) invoice.value = "";
+        show(idRow, false);
+        show(nameRow, false);
+        show(emailRow, false);
+        if (idInput) idInput.value = "";
+        invalidateCustomer("");
+      } else {
+        const inv = invoice ? (invoice.value || "") : "";
+        show(idRow, inv === "YES");
+
+        if (inv !== "YES") {
+          show(nameRow, false);
+          show(emailRow, false);
+          if (idInput) idInput.value = "";
+          invalidateCustomer("");
+        } else {
+          const cur = (idInput?.value || "").trim();
+          if (cur && (!verifiedCustomerId || cur !== verifiedCustomerId)) {
+            customerFound = false;
+            verifiedCustomerId = "";
+            clearCustomerFields();
+            setHint("warn", "Verifica la cédula/NIT (sal del campo) o completa nombre y correo");
+          }
+          applyInvoiceCustomerUI();
+        }
+      }
+      setBtnState(submitBtn, basicValid());
+    }
+
+    if (method) method.addEventListener("change", () => {
+      if (idInput) idInput.value = "";
+      invalidateCustomer("");
+      applyUI();
+    });
+
+    if (invoice) invoice.addEventListener("change", () => {
+      if (idInput) idInput.value = "";
+      invalidateCustomer("");
+      applyUI();
+    });
+
+    form.addEventListener("input", () => setBtnState(submitBtn, basicValid()));
+    form.addEventListener("change", () => setBtnState(submitBtn, basicValid()));
+
+    applyUI();
+    workUI();
+  })();
+
+  /* ==========================
+     ✅ Tabs + filtro pendientes
+     ========================== */
+  (function setupSidebarTabsAndPendingSearch(){
+    const tabs = Array.from(document.querySelectorAll('.sidebar-tab'));
+    const panels = {
+      last: document.getElementById('tab-last'),
+      pending: document.getElementById('tab-pending')
+    };
+
+    function activate(key){
+      tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === key));
+      Object.keys(panels).forEach(k => {
+        const p = panels[k];
+        if (p) p.classList.toggle('active', k === key);
+      });
+    }
+
+    tabs.forEach(t => {
+      t.addEventListener('click', (e) => {
+        e.preventDefault();
+        activate(t.dataset.tab);
+      });
+    });
+
+    const input = document.getElementById('pendingSearchInput');
+    const table = document.getElementById('pendingTicketsTable');
+    if (input && table) {
+      input.addEventListener('input', () => {
+        const q = (input.value || '').trim().toUpperCase();
+        const rows = Array.from(table.querySelectorAll('tr'));
+        rows.forEach(r => {
+          const plate = (r.getAttribute('data-plate') || '').toUpperCase();
+          r.style.display = (!q || plate.includes(q)) ? '' : 'none';
+        });
+      });
+    }
+  })();
+
+  /* ==========================
+     ✅ si vienes con ?mode=charge&plate=XXX, prellena la placa y dispara blur
+     ========================== */
+  (function setupPrefillChargePlate(){
+    const form = document.getElementById('closeForm');
+    if (!form) return;
+
+    const plateInput = form.querySelector('#id_plate');
+    if (!plateInput) return;
+
+    const url = new URL(window.location.href);
+    const plate = (url.searchParams.get('plate') || '').trim().toUpperCase();
+    if (!plate) return;
+
+    if ((plateInput.value || '').trim().length === 0) {
+      plateInput.value = plate;
+      setTimeout(() => plateInput.dispatchEvent(new Event('blur')), 0);
+    }
+  })();
+</script>
+
 {% endblock %}

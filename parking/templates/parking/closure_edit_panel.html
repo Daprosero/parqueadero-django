@@ -1,0 +1,289 @@
+{% extends "parking/base.html" %}
+{% load humanize %}
+
+{% block title %}Cierres de caja{% endblock %}
+
+{% block layout %}
+  <div class="container gestion-container gestion-container-wide">
+    {% block content %}
+
+<style>
+  /* ====== CONTENEDOR SOLO PARA ESTE TEMPLATE ====== */
+  .gestion-container{
+    max-width: 520px;
+    width: 100%;
+  }
+  .gestion-container-wide{
+    max-width: 900px;
+    width: 100%;
+  }
+
+  .card-title {
+    font-size: 1.5rem;
+    font-weight: 800;
+    margin: 0 0 18px 0;
+    color: var(--text-main);
+    text-align: center;
+  }
+
+  .back-link {
+    display: inline-block;
+    margin-bottom: 14px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-weight: 700;
+  }
+  .back-link:hover { color: var(--primary); }
+
+  /* ===== Panels ===== */
+  .panel {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .panel-title {
+    font-weight: 900;
+    margin: 0 0 10px 0;
+    color: var(--text-main);
+  }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  @media (max-width: 900px){
+    .grid-2 { grid-template-columns: 1fr; }
+  }
+
+  .action-btn {
+    width: 100%;
+    padding: 12px;
+    border-radius: 12px;
+    border: none;
+    font-weight: 900;
+    font-size: 1rem;
+    transition: 0.3s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+  }
+  .btn-disabled { background: #e3ebf6; color: #95aac9; cursor: not-allowed; opacity: 1; }
+  .btn-active { background: var(--primary); color: #fff; cursor: pointer; }
+  .btn-active:hover { background: var(--primary-dark); }
+
+  .btn-mini {
+    width: auto;
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-size: 0.85rem;
+  }
+
+  /* Tabla: que no se recorten columnas */
+  .table-wrap{
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  table.simple {
+    width: 100%;
+    min-width: 860px;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+  table.simple th {
+    padding: 10px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    white-space: nowrap;
+  }
+  table.simple td {
+    padding: 10px;
+    border-bottom: 1px solid #f1f4f8;
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+
+  th.col-actions,
+  td.col-actions{
+    min-width: 160px;
+    white-space: nowrap;
+    text-align: right;
+  }
+
+  .link-action {
+    font-weight: 900;
+    color: var(--primary);
+    text-decoration: none;
+  }
+  .link-action:hover { text-decoration: underline; }
+
+  .status-text {
+    font-size: 0.85rem;
+    margin-top: 5px;
+    font-weight: bold;
+    min-height: 1.2em;
+    color: var(--text-muted);
+  }
+
+  input[type="date"]{
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #d2ddec;
+    border-radius: 10px;
+    font-size: 1rem;
+    background: #fff;
+  }
+</style>
+
+{# Feedback Mensajes #}
+{% if messages %}
+  {% for message in messages %}
+    <div style="background:#e3ebf6; color:#2c7be5; padding:10px; border-radius:8px; margin-bottom:16px; font-weight:900; text-align:center;">
+      {{ message }}
+    </div>
+  {% endfor %}
+{% endif %}
+
+<a href="{% url 'parking:gestion' %}" class="back-link">← Volver al Menú</a>
+
+<div class="card-title">Cierres de caja</div>
+<p class="status-text" style="text-align:center; margin-bottom:18px;">
+  Filtra por fechas y abre un cierre para editar / reimprimir.
+</p>
+
+<div class="panel">
+  <div class="panel-title">Buscar</div>
+
+  <form method="get">
+    <div class="grid-2">
+      <div>
+        <label style="font-weight:900; color:var(--text-main);">Desde</label>
+        <input type="date" name="start" value="{{ start }}">
+      </div>
+      <div>
+        <label style="font-weight:900; color:var(--text-main);">Hasta</label>
+        <input type="date" name="end" value="{{ end }}">
+      </div>
+    </div>
+
+    <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;">
+      <button type="submit" class="action-btn btn-active" style="max-width:280px;">
+        Buscar
+      </button>
+      <a href="{% url 'parking:closure_edit_panel' %}" class="action-btn btn-active" style="max-width:280px;">
+        Limpiar
+      </a>
+
+    </div>
+  </form>
+</div>
+
+<div class="panel">
+  <div class="panel-title">Resultados</div>
+
+  <!-- ✅ ajustes SOLO para esta tabla (corrige huecos + scroll tras ~3 filas) -->
+  <style>
+    /* 1) Anula lo global que infla la tabla (min-width 860px) */
+    table.simple.closures-table{
+      min-width: 0 !important;     /* 👈 clave: anula el 860px */
+      width: 100%;
+      table-layout: fixed;          /* 👈 evita huecos raros */
+    }
+
+    /* 2) Compacta padding SOLO aquí */
+    table.simple.closures-table th,
+    table.simple.closures-table td{
+      padding: 6px 8px;
+    }
+
+    /* 3) Anchos por columna */
+    table.simple.closures-table th:nth-child(1),
+    table.simple.closures-table td:nth-child(1){ width: 80px; }    /* ID */
+
+    table.simple.closures-table th:nth-child(3),
+    table.simple.closures-table td:nth-child(3){ width: 120px; }   /* Total */
+
+    table.simple.closures-table th:nth-child(4),
+    table.simple.closures-table td:nth-child(4){
+      width: 90px;                  /* Acciones angosta */
+      min-width: 90px !important;   /* 👈 anula min-width:160px global de .col-actions */
+      text-align: right;
+      padding-left: 6px;
+      padding-right: 6px;
+    }
+
+    /* 4) Periodo ocupa el resto y no empuja */
+    table.simple.closures-table th:nth-child(2),
+    table.simple.closures-table td:nth-child(2){
+      width: auto;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* 5) Scroll vertical después de ~3 registros */
+    .closures-scroll{
+      max-height: 170px;   /* ajusta 150-200 si quieres */
+      overflow-y: auto;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* Header fijo mientras haces scroll */
+    .closures-scroll thead th{
+      position: sticky;
+      top: 0;
+      background: #fff;
+      z-index: 2;
+    }
+  </style>
+
+  <div class="table-wrap closures-narrow">
+    <div class="closures-scroll">
+      <table class="simple closures-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Periodo</th>
+            <th>Total</th>
+            <th class="col-actions">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in closures %}
+            <tr>
+              <td>#{{ c.id }}</td>
+              <td>{{ c.period_start|date:"d/m/Y h:i a" }} → {{ c.period_end|date:"d/m/Y h:i a" }}</td>
+              <td>${{ c.total_amount|default:0|intcomma }}</td>
+              <td class="col-actions">
+                <a href="{% url 'parking:closure_edit_detail' c.id %}"
+                   class="action-btn btn-mini btn-active"
+                   style="display:inline-flex;">
+                  Abrir
+                </a>
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="5" style="padding:12px; color:var(--text-muted);">
+                No hay cierres con esos filtros.
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+    {% endblock %}
+  </div>
+{% endblock %}

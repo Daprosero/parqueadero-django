@@ -1,0 +1,2591 @@
+{% extends "parking/base.html" %}
+
+{% block title %}Panel de Gestión | Los Cámbulos{% endblock %}
+
+{# ✅ IMPORTANTE: en vez de block content, sobrescribimos block layout #}
+{% block layout %}
+  <div class="container gestion-container {% if mode == 'menu' or mode == 'rateplans' or mode == 'vehicletypes' or mode == 'users' or mode == 'open' %}gestion-container-wide{% endif %}">
+    {% block content %}
+
+<style>
+  /* ====== CONTENEDOR SOLO PARA ESTE TEMPLATE (NO AFECTA OTRAS PÁGINAS) ====== */
+  .gestion-container{
+    max-width: 520px; /* igual al base */
+    width: 100%;
+  }
+  /* ✅ SOLO en tarifas / tipos de vehículo / usuarios / open: más ancho */
+  .gestion-container-wide{
+    max-width: 800px; /* ajusta 900/1200/1400/1600 */
+    width: 100%;
+  }
+
+  /* ESTILOS ESPECÍFICOS DE GESTIÓN */
+  .card-title {
+    font-size: 1.5rem;
+    font-weight: 800;
+    margin: 0 0 25px 0;
+    color: var(--text-main);
+    text-align: center;
+  }
+
+  .back-link {
+    display: inline-block;
+    margin-bottom: 20px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-weight: 700;
+  }
+  .back-link:hover { color: var(--primary); }
+
+  /* ✅ GRILLA DEL MENÚ (AHORA 4x2) */
+  .menu-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; }
+  @media (max-width: 980px){
+    .menu-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 420px){
+    .menu-grid { grid-template-columns: 1fr; }
+  }
+
+  .menu-card {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    color: var(--text-main);
+    text-decoration: none;
+    transition: 0.2s;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 120px; /* ✅ para que se vean parejos en 4 columnas */
+  }
+  .menu-card:hover {
+    transform: translateY(-3px);
+    border-color: var(--primary);
+    box-shadow: 0 5px 15px rgba(44,123,229,0.1);
+  }
+
+  .icon-big { font-size: 32px; margin-bottom: 10px; }
+  .title-card { font-weight: 800; font-size: 0.95rem; }
+  .desc-card { font-size: 0.8rem; color: var(--text-muted); margin-top: 5px; }
+
+  /* ESTILOS FORMULARIO */
+  .checkbox-wrapper {
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    background: #f8f9fa;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid #e3ebf6;
+  }
+  .checkbox-wrapper input { width: auto; margin-right: 10px; transform: scale(1.2); }
+
+  /* ✅ NUEVO: wrapper para mostrar/ocultar “Crédito” */
+  .checkbox-wrapper.sub {
+    margin-top: -10px;
+    margin-bottom: 20px;
+  }
+
+  /* ESTADOS DEL BOTÓN */
+  .action-btn {
+    width: 100%;
+    padding: 12px;
+    border-radius: 12px;
+    border: none;
+    font-weight: 900;
+    font-size: 1rem;
+    transition: 0.3s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+  }
+
+  /* ESTADO GRIS (Deshabilitado) */
+  .btn-disabled { background: #e3ebf6; color: #95aac9; cursor: not-allowed; opacity: 1; }
+
+  /* ESTADO AZUL (Habilitado) */
+  .btn-active { background: var(--primary); color: #fff; cursor: pointer; }
+  .btn-active:hover { background: var(--primary-dark); }
+
+  /* Feedback visual */
+  .status-text { font-size: 0.85rem; margin-top: 5px; font-weight: bold; min-height: 1.2em; }
+  .text-blue { color: var(--primary); }
+  .text-green { color: #28a745; }
+  .text-gray { color: #95aac9; }
+
+  /* Error de validación */
+  .input-error { border-color: #dc3545 !important; background-color: #fff8f8; }
+  .error-msg { color: #dc3545; font-size: 0.8rem; font-weight: bold; display: none; margin-top: 4px; }
+
+  /* ===== Panels ===== */
+  .panel {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .panel-title {
+    font-weight: 900;
+    margin: 0 0 10px 0;
+    color: var(--text-main);
+  }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  @media (max-width: 900px){
+    .grid-2 { grid-template-columns: 1fr; }
+  }
+
+  /* Botones iguales (Guardar / Cancelar) */
+  .btn-large{
+    width: 100%;
+    max-width: 280px;
+  }
+
+  /* Tabla: que no se recorten columnas */
+  .table-wrap{
+    overflow-x: auto;
+    overflow-y: visible; /* ✅ antes hidden: puede recortar botones */
+    -webkit-overflow-scrolling: touch;
+  }
+
+  table.simple {
+    width: 100%;
+    min-width: 740px;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+
+  table.simple th {
+    padding: 10px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    white-space: nowrap;
+  }
+
+  table.simple td {
+    padding: 10px;
+    border-bottom: 1px solid #f1f4f8;
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+
+  th.col-actions,
+  td.col-actions{
+    min-width: 260px;
+    white-space: nowrap;
+  }
+
+  .link-action {
+    font-weight: 900;
+    color: var(--primary);
+    text-decoration: none;
+    margin-right: 10px;
+  }
+  .link-action:hover { text-decoration: underline; }
+
+  .btn-mini {
+    width: auto;               /* ✅ no ocupa toda la celda */
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-size: 0.85rem;
+    line-height: 1;
+  }
+
+  .row-actions {
+    display:flex;
+    gap:10px;
+    align-items:center;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+  }
+
+  .hint-box{
+    margin-top:10px;
+    color:var(--text-muted);
+    font-size:0.85rem;
+    line-height:1.35;
+  }
+
+  /* Pills para estado */
+  .status-pill{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-weight: 900;
+    font-size: 0.72rem;
+    margin-left: 8px;
+    border: 1px solid #e3ebf6;
+    background:#f8f9fa;
+    color: var(--text-muted);
+  }
+  .status-pill.active{
+    background:#e7f1ff;
+    color: var(--primary-dark);
+    border-color:#cfe3ff;
+  }
+
+  /* Botón eliminar (siempre visible/clickeable) */
+  .btn-danger{
+    border:1px solid #ffd6d6;
+    background:#fff5f5;
+    color:#b42318;
+    cursor:pointer;           /* ✅ */
+  }
+  .btn-danger:hover{
+    background:#ffecec;       /* ✅ */
+  }
+
+  /* ✅ Asegura que nada lo tape */
+  .table-wrap, table.simple { position: relative; z-index: 1; }
+  .btn-danger { position: relative; z-index: 2; }
+
+  /* ✅ SOLO OPEN: reduce el vacío y acerca el botón */
+  .open-table th.col-actions,
+  .open-table td.col-actions{
+    min-width: 160px;             /* ✅ antes 260px */
+    text-align: left !important;  /* ✅ evita que quede pegado al borde derecho */
+  }
+  .open-table .row-actions{
+    justify-content: flex-start !important; /* ✅ acerca botón */
+  }
+  .open-table th,
+  .open-table td{
+    padding-left: 12px;           /* ✅ compacto */
+    padding-right: 12px;          /* ✅ compacto */
+  }
+
+  /* ✅ Botón extra para imprimir activos */
+  .btn-outline{
+    border: 1px solid var(--border);
+    background: #fff;
+    color: var(--text-main);
+    cursor: pointer;
+  }
+  .btn-outline:hover{
+    border-color: var(--primary);
+    color: var(--primary-dark);
+    box-shadow: 0 5px 15px rgba(44,123,229,0.08);
+  }
+  .sr-only{
+    position:absolute !important;
+    width:1px; height:1px;
+    padding:0; margin:-1px;
+    overflow:hidden; clip:rect(0,0,0,0);
+    white-space:nowrap; border:0;
+  }
+    /* ===== Ajuste SOLO para la tabla de TARIFAS ===== */
+  table.rateplans-table th.col-actions,
+  table.rateplans-table td.col-actions{
+      min-width: 130px;          /* antes 260px */
+      width: 130px;
+      text-align: right;         /* header y celdas iguales */
+    }
+
+    /* "Editar" deja de quedar tan separado del encabezado */
+  table.rateplans-table td.col-actions .row-actions{
+      justify-content: flex-end; /* se mantiene a la derecha */
+      padding-right: 6px;        /* lo acerca un poco */
+    }
+/* ===== Scroll vertical para mostrar ~3 filas (Tipos de Vehículo) ===== */
+  .vehicletypes-scroll-inner{
+    max-height: 160px;      /* ≈ 3 filas (ajusta 150–190 según tu vista) */
+    overflow-y: auto;
+    overflow-x: auto;       /* mantiene scroll horizontal si aplica */
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* (Opcional) deja el encabezado fijo mientras haces scroll */
+  .vehicletypes-scroll-inner thead th{
+    position: sticky;
+    top: 0;
+    background: #fff;
+    z-index: 2;
+  }
+  /* ===== Scroll vertical para TARIFAS (máx ~7 filas) ===== */
+  .rateplans-scroll-inner{
+    max-height: 300px;      /* ≈ 7 filas */
+    overflow-y: auto;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Encabezado fijo mientras haces scroll */
+  .rateplans-scroll-inner thead th{
+    position: sticky;
+    top: 0;
+    background: #fff;
+    z-index: 2;
+  }
+
+  /* ===== Scroll vertical para USUARIOS (máx ~3 registros) ===== */
+  .users-scroll-inner{
+    max-height: 320px;      /* ≈ 3 registros (cada registro es alto por el form de clave) */
+    overflow-y: auto;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Encabezado fijo mientras haces scroll */
+  .users-scroll-inner thead th{
+    position: sticky;
+    top: 0;
+    background: #fff;
+    z-index: 2;
+  }
+/* ================================ */
+/* CLIENTES MENSUALES – AJUSTES UI */
+/* ================================ */
+
+/* Tabla mensual */
+  /* IMPORTANTE: usa el wrapper para ganar especificidad */
+  .monthly-wrap table.simple.monthly-table{
+    width: 100% !important;
+    min-width: 400px;
+    table-layout: fixed !important;  /* ✅ CLAVE */
+  }
+
+  /* Reduce padding SOLO en esta tabla */
+  .monthly-wrap table.simple.monthly-table th,
+  .monthly-wrap table.simple.monthly-table td{
+    padding: 8px 8px !important;
+    white-space: nowrap;
+  }
+
+  /* "Registrado" no se estira de más */
+  .monthly-wrap table.simple.monthly-table th:nth-child(2),
+  .monthly-wrap table.simple.monthly-table td:nth-child(2){
+    width: 130px !important;  /* ✅ mejor que 1% */
+  }
+
+  /* Acciones compactas */
+  .monthly-wrap table.simple.monthly-table th.col-actions,
+  .monthly-wrap table.simple.monthly-table td.col-actions{
+    width: 210px !important;       /* ✅ fuerza columna acciones */
+    padding-left: 6px !important;
+    padding-right: 6px !important;
+    text-align: right !important;
+  }
+
+  /* Botones compactos */
+  .monthly-wrap table.simple.monthly-table .row-actions{
+    display: inline-flex !important;
+    justify-content: flex-end !important;
+    gap: 8px !important;
+    flex-wrap: nowrap !important;
+    white-space: nowrap !important;
+  }
+
+  /* ✅ Scroll vertical después de ~4 registros */
+  .monthly-scroll-inner{
+    max-height: 210px;
+    overflow-y: auto;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Header fijo mientras haces scroll */
+  .monthly-scroll-inner thead th{
+    position: sticky;
+    top: 0;
+    background: #fff;
+    z-index: 2;
+  }
+
+
+</style>
+
+
+<!-- Feedback Mensajes -->
+{% if messages %}
+  {% for message in messages %}
+    <div style="background: #e3ebf6; color: #2c7be5; padding: 10px; border-radius: 8px; margin-bottom: 20px; font-weight: bold; text-align: center;">
+      {{ message }}
+    </div>
+  {% endfor %}
+{% endif %}
+
+<!-- ========================= -->
+<!-- MODO 1: MENÚ PRINCIPAL -->
+<!-- ========================= -->
+{% if mode == 'menu' %}
+  <div class="card-title">Panel de Gestión</div>
+  <p style="text-align:center; color:var(--text-muted); margin-bottom:30px;">
+      Selecciona una opción para administrar
+  </p>
+
+  <div class="menu-grid">
+      <a href="?mode=customer" class="menu-card">
+          <span class="icon-big">👥</span>
+          <span class="title-card">Nuevo Cliente</span>
+          <span class="desc-card">Facturación y crédito</span>
+      </a>
+
+      <a href="?mode=vehicletypes" class="menu-card">
+          <span class="icon-big">🚙</span>
+          <span class="title-card">Tipos de Vehículo</span>
+          <span class="desc-card">Crear / editar</span>
+      </a>
+
+      <a href="?mode=rateplans" class="menu-card">
+          <span class="icon-big">💲</span>
+          <span class="title-card">Tarifas</span>
+          <span class="desc-card">Crear / editar</span>
+      </a>
+
+      <a href="?mode=users" class="menu-card">
+          <span class="icon-big">🧑‍🔧</span>
+          <span class="title-card">Operarios</span>
+          <span class="desc-card">Crear / editar / activar</span>
+      </a>
+
+      {# ✅ NUEVO: CLIENTES MENSUALES #}
+      <a href="?mode=monthly" class="menu-card">
+          <span class="icon-big">🗓️</span>
+          <span class="title-card">Clientes mensuales</span>
+          <span class="desc-card">Placas / cobrar / eliminar</span>
+      </a>
+
+
+      {# ✅ NUEVO: PAGO DE EMPRESA (LIQUIDAR ASIGNADOS) #}
+      <a href="?mode=company_settle" class="menu-card">
+          <span class="icon-big">🧾</span>
+          <span class="title-card">Pago de Empresa</span>
+          <span class="desc-card">Liquidar asignados</span>
+      </a>
+
+      {# ✅ VEHÍCULOS ACTIVOS (ADMIN) #}
+      <a href="?mode=open" class="menu-card">
+          <span class="icon-big">🚗</span>
+          <span class="title-card">Vehículos Activos</span>
+          <span class="desc-card">Ver listado / eliminar / imprimir</span>
+      </a>
+
+      {# ✅ CIERRES DE CAJA (panel de edición/reimpresión) #}
+      <a href="{% url 'parking:closure_edit_panel' %}" class="menu-card">
+          <span class="icon-big">📦</span>
+          <span class="title-card">Cierres de caja</span>
+          <span class="desc-card">Buscar / editar / reimprimir</span>
+      </a>
+  </div>
+{% endif %}
+<!-- ========================= -->
+<!-- ✅ MODO: PAGO DE EMPRESA (LIQUIDAR ASIGNADOS) -->
+<!-- ========================= -->
+{% if mode == 'company_settle' %}
+  <a href="?mode=menu" class="back-link">← Volver al Menú</a>
+  <div class="card-title">Pago de Empresa</div>
+
+  <div class="panel">
+    <div class="panel-title">Selecciona empresa</div>
+
+    <form method="post" id="companySettleForm" action="?mode=company_settle" autocomplete="off">
+      {% csrf_token %}
+
+      <div class="grid-2">
+        <div style="grid-column:1 / -1;">
+          <label for="{{ form.company.id_for_label }}">{{ form.company.label }}</label>
+          {{ form.company }}
+          {% if form.company.errors %}
+            <small style="color:#dc3545; font-weight:700;">{{ form.company.errors.0 }}</small>
+          {% endif %}
+
+          <!-- ✅ Hint empresa -->
+          <div id="companyCreditHint" class="status-text text-gray" style="margin-top:8px;">
+            Selecciona una empresa para cargar montos y tickets.
+          </div>
+        </div>
+      </div>
+
+      <!-- ================== -->
+      <!-- ✅ MONTOS (DESPUÉS DE EMPRESA) -->
+      <!-- ================== -->
+      <div class="panel" style="margin-top:14px;">
+        <div class="panel-title">Montos</div>
+
+        <div class="grid-2">
+          <div>
+            <label>Parqueadero (COP)</label>
+            <input type="text" id="sumParking" value="0" readonly
+                   style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px; background:#f8f9fa; font-weight:800;">
+          </div>
+
+          <div>
+            <label>Servicio (COP) <span style="color:var(--text-muted); font-weight:700;">(editable)</span></label>
+            <input type="text" id="sumService" value="0"
+                   style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+          </div>
+
+          <div style="grid-column:1 / -1;">
+            <label style="font-weight:900;">TOTAL (COP)</label>
+            <input type="text" id="sumTotal" value="0" readonly
+                   style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px; font-weight:900; background:#f8f9fa;">
+          </div>
+        </div>
+
+        {# ✅ hidden para backend #}
+        <input type="hidden" name="amount_parking_cop" id="amountParkingHidden" value="0">
+        <input type="hidden" name="amount_service_cop" id="amountServiceHidden" value="0">
+        <input type="hidden" name="tickets_payload" id="ticketsPayload" value="">
+      </div>
+
+      <!-- ================== -->
+      <!-- ✅ PAGO (MÉTODO + FACTURA EN UN SOLO RECUADRO) -->
+      <!-- ================== -->
+      <div class="panel">
+        <div class="panel-title">Pago</div>
+
+        <div class="grid-2">
+          <!-- Método -->
+          <div style="grid-column:1 / -1;">
+            <label for="{{ form.method.id_for_label }}" style="display:none;">{{ form.method.label }}</label>
+            <div style="font-weight:900; margin-bottom:6px; color:var(--text-main);">Método de pago</div>
+            {{ form.method }}
+            {% if form.method.errors %}
+              <small style="color:#dc3545; font-weight:700;">{{ form.method.errors.0 }}</small>
+            {% endif %}
+          </div>
+
+          <div id="transferRefBox" style="display:none; grid-column:1 / -1;">
+            <label for="{{ form.transfer_ref.id_for_label }}" style="display:none;">{{ form.transfer_ref.label }}</label>
+            <div style="font-weight:900; margin-bottom:6px; color:var(--text-main);">Referencia de transferencia</div>
+            {{ form.transfer_ref }}
+          </div>
+
+          <hr style="grid-column:1 / -1; border:none; border-top:1px solid #f1f4f8; margin:8px 0 2px;">
+
+          <!-- Factura -->
+          <div style="grid-column:1 / -1;">
+            <label for="{{ form.invoice_required.id_for_label }}" style="display:none;">{{ form.invoice_required.label }}</label>
+            <div style="font-weight:900; margin-bottom:6px; color:var(--text-main);">Factura electrónica</div>
+
+            {{ form.invoice_required }}
+
+            <!-- ✅ CHIP: en empresa NO se piden datos; se usa lo guardado en la empresa -->
+            <span id="companyCustomerHint" class="hint-chip" style="display:none;"></span>
+
+            <!-- ✅ IMPORTANTE:
+                 Ya NO mostramos campos (id/nombre/correo) porque en backend se factura con la empresa.
+                 Si tu form los trae por defecto, los dejamos “silenciados” aquí (hidden) para que no estorben. -->
+            <div id="invoiceFields" style="display:none; grid-column:1 / -1;">
+              <div class="grid-2">
+                <div>
+                  <label for="{{ form.id_number.id_for_label }}">{{ form.id_number.label }}</label>
+                  {{ form.id_number }}
+                </div>
+                <div>
+                  <label for="{{ form.full_name.id_for_label }}">{{ form.full_name.label }}</label>
+                  {{ form.full_name }}
+                </div>
+                <div style="grid-column:1 / -1;">
+                  <label for="{{ form.email.id_for_label }}">{{ form.email.label }}</label>
+                  {{ form.email }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {% if form.non_field_errors %}
+          <div style="margin-top:10px; color:#dc3545; font-weight:900;">
+            {{ form.non_field_errors }}
+          </div>
+        {% endif %}
+      </div>
+
+      <!-- ================== -->
+      <!-- ✅ BOTÓN PROCESAR -->
+      <!-- ================== -->
+      <button type="submit" id="companyPayBtn" class="action-btn btn-disabled" disabled>
+        Procesar pago
+      </button>
+
+      <div id="companyPayHint" class="status-text text-gray" style="margin-top:10px;">
+        Selecciona una empresa, revisa montos y completa método/factura.
+      </div>
+
+      <!-- ================== -->
+      <!-- ✅ REGISTROS / TICKETS (AL FINAL) -->
+      <!-- ================== -->
+      <div class="panel" style="margin-top:14px;">
+        <div class="panel-title">Registros (tickets asignados)</div>
+
+        <div id="assignedEmpty" style="display:none; padding:12px; color:var(--text-muted); font-style:italic;">
+          Esta empresa no tiene tickets asignados.
+        </div>
+
+        <div id="assignedWrap" class="table-wrap" style="display:none;">
+          <div style="max-height: 210px; overflow-y:auto; border-top:1px solid #f1f4f8;">
+            <table class="simple" style="min-width: 980px;">
+              <thead style="position:sticky; top:0; background:#fff; z-index:2;">
+                <tr>
+                  <th>Placa</th>
+                  <th>Ingreso</th>
+                  <th>Salida</th>
+                  <th>Total</th>
+                </tr>
+              </thead>
+              <tbody id="assignedBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <script>
+  (function setupCompanySettle(){
+    const form = document.getElementById("companySettleForm");
+    if(!form) return;
+
+    const companySel = form.querySelector('[name="company"]');
+    const methodSel  = form.querySelector('[name="method"]');
+    const invoiceSel = form.querySelector('[name="invoice_required"]');
+    const transferRef = form.querySelector('[name="transfer_ref"]');
+
+    const transferBox = document.getElementById("transferRefBox");
+    const invoiceFields = document.getElementById("invoiceFields");
+
+    const creditHint = document.getElementById("companyCreditHint");
+
+    const wrap = document.getElementById("assignedWrap");
+    const empty = document.getElementById("assignedEmpty");
+    const body = document.getElementById("assignedBody");
+
+    const sumParking = document.getElementById("sumParking");
+    const sumService = document.getElementById("sumService");
+    const sumTotal = document.getElementById("sumTotal");
+
+    const hParking = document.getElementById("amountParkingHidden");
+    const hService = document.getElementById("amountServiceHidden");
+    const payload = document.getElementById("ticketsPayload");
+
+    const payBtn = document.getElementById("companyPayBtn");
+    const payHint = document.getElementById("companyPayHint");
+
+    // ✅ CHIP “Factura electrónica”
+    const customerHint = document.getElementById("companyCustomerHint");
+
+    let tickets = [];
+
+    function fmt(n){
+      try{ return Number(n||0).toLocaleString("es-CO"); }
+      catch(e){ return String(n||0); }
+    }
+    function parseNum(s){
+      return Number(String(s||"").replace(/[^\d]/g,"") || 0);
+    }
+    function setChip(kind, text){
+      if(!customerHint) return;
+      customerHint.textContent = text || "";
+      customerHint.className = "hint-chip" + (kind ? (" " + kind) : "");
+      customerHint.style.display = text ? "inline-flex" : "none";
+    }
+    function setEnabled(on){
+      payBtn.disabled = !on;
+      payBtn.classList.toggle("btn-active", on);
+      payBtn.classList.toggle("btn-disabled", !on);
+      payHint.className = "status-text " + (on ? "text-green" : "text-gray");
+      payHint.textContent = on
+        ? "Listo: puedes procesar el pago."
+        : "Selecciona una empresa, revisa montos y completa método/factura.";
+    }
+
+    function toggleTransfer(){
+      const m = (methodSel?.value || "").trim();
+      if(m === "TRANSFER"){
+        transferBox.style.display = "";
+      }else{
+        transferBox.style.display = "none";
+        if(transferRef) transferRef.value = "";
+      }
+    }
+
+    // =========================================================
+    // ✅ EMPRESA - FACTURA ELECTRÓNICA (NUEVA REGLA)
+    // - NO se piden datos (NIT/nombre/correo ya están en la empresa)
+    // - Solo mostramos un chip informativo
+    // - Campos (si existen en form) se mantienen ocultos
+    // =========================================================
+    function toggleInvoice(){
+      const v = (invoiceSel?.value || "").trim();
+      const on = (v === "YES");
+
+      // siempre oculto: en empresa no pedimos id/nombre/email
+      if(invoiceFields) invoiceFields.style.display = "none";
+
+      if(on){
+        setChip("ok", "Se facturará con los datos guardados de la empresa (NIT/nombre/correo).");
+      }else{
+        setChip("", "");
+      }
+    }
+
+    function syncHiddenAmounts(){
+      const p = Math.max(0, parseNum(sumParking.value));
+      const s = Math.max(0, parseNum(sumService.value));
+      const t = p + s;
+
+      hParking.value = String(p);
+      hService.value = String(s);
+      sumTotal.value = fmt(t);
+    }
+
+    function applyServerSums(server){
+      const p = Math.max(0, Number(server?.sum_parking || 0));
+      const s = Math.max(0, Number(server?.sum_service || 0));
+
+      sumParking.value = fmt(p);
+      sumService.value = fmt(s);
+      syncHiddenAmounts();
+    }
+
+    function renderTickets(){
+      body.innerHTML = "";
+
+      if(!tickets.length){
+        wrap.style.display = "none";
+        empty.style.display = "";
+        payload.value = "";
+        sumParking.value = fmt(0);
+        sumService.value = fmt(0);
+        syncHiddenAmounts();
+        validateReady();
+        return;
+      }
+
+      empty.style.display = "none";
+      wrap.style.display = "";
+
+      for(const t of tickets){
+        const total = Number(t.total || 0);
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td style="font-weight:900;">${t.plate || ""}</td>
+          <td style="font-family:monospace;">${t.check_in || ""}</td>
+          <td style="font-family:monospace;">${t.check_out || ""}</td>
+          <td>${fmt(total)}</td>
+        `;
+        body.appendChild(tr);
+      }
+
+      payload.value = JSON.stringify(tickets.map(x => ({ id: x.id })));
+      syncHiddenAmounts();
+      validateReady();
+    }
+
+    function validateReady(){
+      const companyOk = !!(companySel && companySel.value);
+      const hasTickets = tickets.length > 0;
+
+      const method = (methodSel?.value || "").trim();
+      const methodOk = (method === "CASH" || method === "TRANSFER");
+
+      const transferOk = (method !== "TRANSFER") || (transferRef && transferRef.value.trim().length > 0);
+
+      const inv = (invoiceSel?.value || "").trim();
+      const invOk = (inv === "NO" || inv === "YES");
+
+      const p = parseNum(sumParking.value);
+      const s = parseNum(sumService.value);
+      const amountsOk = (p + s) > 0;
+
+      // ✅ EMPRESA: NO validamos datos de factura (backend usa company)
+      const invoiceDataOk = true;
+
+      setEnabled(companyOk && hasTickets && methodOk && transferOk && invOk && amountsOk && invoiceDataOk);
+    }
+
+    async function loadCompanyTickets(){
+      const cid = (companySel?.value || "").trim();
+      tickets = [];
+      applyServerSums({ sum_parking: 0, sum_service: 0 });
+      renderTickets();
+
+      if(!cid){
+        creditHint.textContent = "Selecciona una empresa para cargar montos y tickets.";
+        creditHint.className = "status-text text-gray";
+        return;
+      }
+
+      creditHint.textContent = "Cargando información...";
+      creditHint.className = "status-text text-blue";
+
+      try{
+        const params = new URLSearchParams({ mode: "company_settle_lookup", company_id: cid });
+        const res = await fetch(`?${params.toString()}`, { headers: { "x-requested-with": "XMLHttpRequest" }});
+        const data = await res.json();
+
+        if(!data.success){
+          creditHint.textContent = data.message || "No se pudo cargar.";
+          creditHint.className = "status-text text-gray";
+          tickets = [];
+          applyServerSums({ sum_parking: 0, sum_service: 0 });
+          renderTickets();
+          return;
+        }
+
+        tickets = data.tickets || [];
+        applyServerSums(data);
+
+        if(tickets.length){
+          creditHint.textContent = "Cargado. Revisa montos y procesa el pago.";
+          creditHint.className = "status-text text-green";
+        }else{
+          creditHint.textContent = "Esta empresa no tiene tickets asignados.";
+          creditHint.className = "status-text text-gray";
+        }
+
+        renderTickets();
+      }catch(e){
+        console.error(e);
+        creditHint.textContent = "Error de conexión al cargar.";
+        creditHint.className = "status-text text-gray";
+        tickets = [];
+        applyServerSums({ sum_parking: 0, sum_service: 0 });
+        renderTickets();
+      }
+    }
+
+    // =========================
+    // ✅ Events
+    // =========================
+    companySel && companySel.addEventListener("change", () => {
+      loadCompanyTickets();
+      toggleInvoice();
+      validateReady();
+    });
+
+    methodSel && methodSel.addEventListener("change", () => { toggleTransfer(); validateReady(); });
+    transferRef && transferRef.addEventListener("input", validateReady);
+
+    invoiceSel && invoiceSel.addEventListener("change", () => {
+      toggleInvoice();
+      validateReady();
+    });
+
+    // ✅ SOLO servicio editable
+    if(sumService){
+      sumService.addEventListener("input", () => { syncHiddenAmounts(); validateReady(); });
+      sumService.addEventListener("blur", () => {
+        sumService.value = fmt(parseNum(sumService.value));
+        syncHiddenAmounts();
+        validateReady();
+      });
+    }
+
+    // init
+    toggleTransfer();
+    toggleInvoice();
+    syncHiddenAmounts();
+    validateReady();
+  })();
+  </script>
+{% endif %}
+
+<!-- ====================================== -->
+<!-- MODO OPEN: LISTADO VEHÍCULOS ACTIVOS -->
+<!-- ====================================== -->
+{% if mode == 'open' %}
+  <a href="?mode=menu" class="back-link">← Volver al Menú</a>
+  <div class="card-title">Vehículos Activos</div>
+
+  {# ✅ NUEVO: BOTÓN IMPRIMIR ACTIVOS (NO IMPORTA EL USUARIO) #}
+  <div style="display:flex; gap:10px; justify-content:center; margin:-6px 0 14px 0; flex-wrap:wrap;">
+    <a href="{% url 'parking:active_vehicles_report' %}?next={{ request.get_full_path|urlencode }}"
+       style="text-decoration:none; width:100%; max-width:320px;">
+      <button type="button" class="action-btn btn-outline btn-large" style="max-width:none;">
+        🧾 Imprimir activos
+      </button>
+    </a>
+  </div>
+
+  <!-- ✅ AJUSTES SOLO PARA ESTE APARTADO: scroll tras 6 registros -->
+  <style>
+    /* Contenedor scroll: ~6 filas (ajusta si tu fila es más alta) */
+    .open-scroll-inner{
+      max-height: 320px;      /* ✅ aprox 6 filas + header */
+      overflow-y: auto;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* Header fijo mientras haces scroll */
+    .open-scroll-inner thead th{
+      position: sticky;
+      top: 0;
+      background: #fff;
+      z-index: 2;
+    }
+  </style>
+
+  <div class="panel" style="padding:0;">
+    <div style="padding:15px; border-bottom:1px solid #f1f4f8; font-weight:800; color:var(--text-muted); font-size:0.85rem; background:#f8f9fa;">
+      LISTADO ({{ open_tickets|length }})
+    </div>
+
+    {% if open_tickets %}
+      <div class="table-wrap">
+        <div class="open-scroll-inner">
+          <table class="simple open-table" style="min-width: 680px;">
+            <thead>
+              <tr>
+                <th>Placa</th>
+                <th>Tipo</th>
+                <th>Ingreso</th>
+                <th class="col-actions" style="text-align:right;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+            {% for t in open_tickets %}
+              <tr>
+                <td style="font-weight:900; color:var(--text-main);">
+                  {{ t.plate }}
+                  <span class="status-pill active">ACTIVO</span>
+                </td>
+                <td>{{ t.vehicle_type.name }}</td>
+                <td style="font-family:monospace;">{{ t.ui_checkin }}</td>
+
+                <td class="col-actions">
+                  <div class="row-actions">
+                    <form method="post"
+                          action="{% url 'parking:ticket_delete_active' t.id %}?next={{ request.get_full_path|urlencode }}"
+                          style="display:inline;">
+                      {% csrf_token %}
+                      <button type="submit"
+                              class="action-btn btn-mini btn-danger"
+                              onclick="return confirm('¿Eliminar el ticket activo {{ t.plate }}?');">
+                        Eliminar
+                      </button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% else %}
+      <div style="padding:40px 0; text-align:center; color:var(--text-muted); font-style:italic;">
+        No hay vehículos en el parqueadero.
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="hint-box">
+    * Esta lista muestra tickets en estado <b>ACTIVE</b>. Eliminar es una acción administrativa.
+  </div>
+{% endif %}
+
+
+<!-- ========================= -->
+<!-- MODO 2: FORMULARIO CLIENTE -->
+<!-- ========================= -->
+{% if mode == 'customer' %}
+  <a href="?mode=menu" class="back-link">← Volver al Menú</a>
+  <div class="card-title">Registrar Cliente</div>
+
+  <form method="post" id="customerForm" autocomplete="off" action="?mode=customer">
+      {% csrf_token %}
+
+      <div>
+          <label for="{{ form.id_number.id_for_label }}">Cédula o NIT (Solo números)</label>
+          {{ form.id_number }}
+          <div id="idStatus" class="status-text text-gray">Ingresa el número para verificar.</div>
+          {% if form.id_number.errors %}
+              <small style="color:#dc3545; font-weight:700;">{{ form.id_number.errors.0 }}</small>
+          {% endif %}
+      </div>
+      <br>
+
+      <div id="restOfForm" style="display: none;">
+          <div>
+              <label for="{{ form.full_name.id_for_label }}">{{ form.full_name.label }}</label>
+              {{ form.full_name }}
+          </div>
+          <br>
+
+          <div>
+              <label for="{{ form.email.id_for_label }}">{{ form.email.label }}</label>
+              {{ form.email }}
+              <div id="emailError" class="error-msg">El correo debe ser válido (ej: usuario@dominio.com)</div>
+          </div>
+          <br>
+
+          <div class="checkbox-wrapper">
+              {{ form.is_company }}
+              <label for="{{ form.is_company.id_for_label }}" style="margin:0; cursor:pointer; font-weight:normal;">
+                  {{ form.is_company.label }}
+              </label>
+          </div>
+
+          {% if form.credit_enabled %}
+            <div class="checkbox-wrapper sub" id="creditEnabledRow" style="display:none;">
+                {{ form.credit_enabled }}
+                <label for="{{ form.credit_enabled.id_for_label }}" style="margin:0; cursor:pointer; font-weight:normal;">
+                    {{ form.credit_enabled.label }}
+                </label>
+            </div>
+          {% endif %}
+
+          <button type="submit" id="customerSubmit" class="action-btn btn-disabled" disabled>
+              Guardar Cliente
+          </button>
+
+          <div id="creditHint" class="status-text text-gray" style="margin-top:10px; display:none;">
+            Si es empresa y <b>no</b> tiene crédito, los tickets quedarán en <b>PENDIENTE</b>.
+          </div>
+      </div>
+
+  </form>
+
+  <script>
+    (function setupCustomer(){
+      const idInput = document.querySelector('[name="id_number"]');
+      const nameInput = document.querySelector('[name="full_name"]');
+      const emailInput = document.querySelector('[name="email"]');
+      const companyInput = document.querySelector('[name="is_company"]');
+
+      const creditInput = document.querySelector('[name="credit_enabled"]');
+      const creditRow = document.getElementById("creditEnabledRow");
+      const creditHint = document.getElementById("creditHint");
+
+      const restOfForm = document.getElementById("restOfForm");
+      const submitBtn = document.getElementById("customerSubmit");
+      const idStatus = document.getElementById("idStatus");
+      const emailError = document.getElementById("emailError");
+
+      let isSearching = false;
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+      function syncCreditUI(){
+        if(!creditInput || !creditRow) return;
+
+        const isCompany = !!(companyInput && companyInput.checked);
+
+        if(isCompany){
+          creditRow.style.display = "";
+          if(creditHint) creditHint.style.display = "";
+        } else {
+          creditRow.style.display = "none";
+          creditInput.checked = false;
+          if(creditHint) creditHint.style.display = "none";
+        }
+      }
+
+      idInput.addEventListener('input', function() {
+          this.value = this.value.replace(/[^0-9]/g, '');
+          restOfForm.style.display = 'none';
+          idStatus.textContent = "Ingresa el número para verificar.";
+          idStatus.className = "status-text text-gray";
+          disableButton();
+      });
+
+      idInput.addEventListener('blur', async function() {
+          const val = this.value.trim();
+          if (val.length === 0) return;
+
+          isSearching = true;
+          idStatus.textContent = "Buscando...";
+          idStatus.className = "status-text text-blue";
+          disableButton();
+
+          try {
+              const params = new URLSearchParams({ mode: "lookup_customer", id: val });
+              const response = await fetch(`?${params.toString()}`);
+              const data = await response.json();
+
+              restOfForm.style.display = 'block';
+
+              if (data.found) {
+                  nameInput.value = data.full_name || "";
+                  emailInput.value = data.email || "";
+                  companyInput.checked = !!data.is_company;
+
+                  if(creditInput && typeof data.credit_enabled !== "undefined"){
+                    creditInput.checked = !!data.credit_enabled;
+                  }
+
+                  idStatus.textContent = "✔ Cliente existente. Puedes editar la información.";
+                  idStatus.className = "status-text text-green";
+                  submitBtn.textContent = "Actualizar Cliente";
+              } else {
+                  nameInput.value = "";
+                  emailInput.value = "";
+                  companyInput.checked = false;
+
+                  if(creditInput) creditInput.checked = false;
+
+                  idStatus.textContent = "Nuevo registro disponible.";
+                  idStatus.className = "status-text text-blue";
+                  submitBtn.textContent = "Registrar Cliente";
+              }
+          } catch (error) {
+              console.error(error);
+              idStatus.textContent = "Error de conexión.";
+              idStatus.className = "status-text text-gray";
+          } finally {
+              isSearching = false;
+              syncCreditUI();
+              checkValid();
+          }
+      });
+
+      function checkValid() {
+          if (isSearching || restOfForm.style.display === 'none') {
+              disableButton();
+              return;
+          }
+
+          const vId = (idInput?.value || "").trim();
+          const vName = (nameInput?.value || "").trim();
+          const vEmail = (emailInput?.value || "").trim();
+
+          const isEmailValid = emailRegex.test(vEmail);
+
+          if (vEmail.length > 0 && !isEmailValid) {
+              emailInput.classList.add("input-error");
+              emailError.style.display = "block";
+          } else {
+              emailInput.classList.remove("input-error");
+              emailError.style.display = "none";
+          }
+
+          const readyToSubmit = (vId.length > 0 && vName.length > 0 && isEmailValid);
+          if (readyToSubmit) enableButton();
+          else disableButton();
+      }
+
+      function enableButton() {
+          submitBtn.disabled = false;
+          submitBtn.classList.remove("btn-disabled");
+          submitBtn.classList.add("btn-active");
+      }
+
+      function disableButton() {
+          submitBtn.disabled = true;
+          submitBtn.classList.remove("btn-active");
+          submitBtn.classList.add("btn-disabled");
+      }
+
+      [nameInput, emailInput, companyInput, creditInput].filter(Boolean).forEach(el => {
+          el.addEventListener('input', () => { syncCreditUI(); checkValid(); });
+          el.addEventListener('change', () => { syncCreditUI(); checkValid(); });
+      });
+
+      syncCreditUI();
+
+    })();
+  </script>
+{% endif %}
+
+<!-- ========================= -->
+<!-- MODO 3: TIPOS DE VEHÍCULO -->
+<!-- ========================= -->
+{% if mode == 'vehicletypes' %}
+  <a href="?mode=menu" class="back-link">← Volver al Menú</a>
+  <div class="card-title">{% if editing_vehicle_type %}Editar Tipo de Vehículo{% else %}Tipos de Vehículo{% endif %}</div>
+
+  <div class="panel">
+    <div class="panel-title">{% if editing_vehicle_type %}Editar{% else %}Crear nuevo{% endif %}</div>
+
+    <form method="post" action="?mode=vehicletypes{% if editing_vehicle_type %}&id={{ editing_vehicle_type.id }}{% endif %}">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="save_vehicle_type">
+
+      <div class="grid-2">
+        <div style="grid-column:1 / -1;">
+          <label for="{{ form.name.id_for_label }}">Nombre</label>
+          {{ form.name }}
+          {% if form.name.errors %}
+            <small style="color:#dc3545; font-weight:700;">{{ form.name.errors.0 }}</small>
+          {% endif %}
+        </div>
+
+        <div style="display:none;">
+          {{ form.active }}
+        </div>
+      </div>
+
+      {% if form.non_field_errors %}
+        <div style="margin-top:10px; color:#dc3545; font-weight:900;">
+          {{ form.non_field_errors }}
+        </div>
+      {% endif %}
+
+      <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;">
+        <button type="submit" class="action-btn btn-active btn-large">
+          {% if editing_vehicle_type %}Guardar cambios{% else %}Crear{% endif %}
+        </button>
+
+        {% if editing_vehicle_type %}
+          <a href="?mode=vehicletypes" class="action-btn btn-disabled btn-large">Cancelar</a>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Listado</div>
+
+    <div class="table-wrap vehicletypes-scroll">
+      <div class="vehicletypes-scroll-inner">
+        <table class="simple" style="min-width: 740px;">
+          <thead>
+            <tr>
+              <th>Nombre</th>
+              <th class="col-actions">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for vt in vehicle_types %}
+              <tr>
+                <td>{{ vt.name }}</td>
+                <td class="col-actions">
+                  <div class="row-actions" style="justify-content:flex-start;">
+                    <a href="?mode=vehicletypes&id={{ vt.id }}" class="link-action">Editar</a>
+                  </div>
+                </td>
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="2" style="padding:12px; color:var(--text-muted);">No hay tipos de vehículo registrados.</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+{% endif %}
+
+<!-- ========================= -->
+<!-- MODO 4: TARIFAS -->
+<!-- ========================= -->
+{% if mode == 'rateplans' %}
+  <a href="?mode=menu" class="back-link">← Volver al Menú</a>
+  <div class="card-title">{% if editing_rateplan %}Editar Tarifa{% else %}Tarifas{% endif %}</div>
+
+  <div class="panel">
+    <div class="panel-title">{% if editing_rateplan %}Editar tarifa{% else %}Crear nueva tarifa{% endif %}</div>
+
+    <form method="post" id="rateplanForm" action="?mode=rateplans{% if editing_rateplan %}&id={{ editing_rateplan.id }}{% endif %}">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="save_rateplan">
+
+      <div class="grid-2">
+        <div>
+          <label for="{{ form.vehicle_type.id_for_label }}">Tipo de vehículo</label>
+          {{ form.vehicle_type }}
+          {% if form.vehicle_type.errors %}
+            <small style="color:#dc3545; font-weight:700;">{{ form.vehicle_type.errors.0 }}</small>
+          {% endif %}
+        </div>
+
+        <div>
+          <label for="{{ form.client_kind.id_for_label }}">Tipo de cliente</label>
+          {{ form.client_kind }}
+          {% if form.client_kind.errors %}
+            <small style="color:#dc3545; font-weight:700;">{{ form.client_kind.errors.0 }}</small>
+          {% endif %}
+        </div>
+
+        <div>
+          <label for="{{ form.billing_unit.id_for_label }}">Unidad de cobro</label>
+          {{ form.billing_unit }}
+          {% if form.billing_unit.errors %}
+            <small style="color:#dc3545; font-weight:700;">{{ form.billing_unit.errors.0 }}</small>
+          {% endif %}
+        </div>
+
+        <div>
+          <label for="{{ form.day_type.id_for_label }}">Tipo de día</label>
+          {{ form.day_type }}
+          {% if form.day_type.errors %}
+            <small style="color:#dc3545; font-weight:700;">{{ form.day_type.errors.0 }}</small>
+          {% endif %}
+        </div>
+
+        <div>
+          <label for="{{ form.price_cop.id_for_label }}">Precio (COP)</label>
+          {{ form.price_cop }}
+          {% if form.price_cop.errors %}
+            <small style="color:#dc3545; font-weight:700;">{{ form.price_cop.errors.0 }}</small>
+          {% endif %}
+        </div>
+
+        <div style="display:none;">
+          {{ form.active }}
+        </div>
+      </div>
+
+      {% if form.non_field_errors %}
+        <div style="margin-top:10px; color:#dc3545; font-weight:900;">
+          {{ form.non_field_errors }}
+        </div>
+      {% endif %}
+
+      <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;">
+        <button id="rateplanSubmit" type="submit" class="action-btn btn-disabled btn-large" disabled>
+          {% if editing_rateplan %}Guardar cambios{% else %}Crear / Actualizar{% endif %}
+        </button>
+
+        {% if editing_rateplan %}
+          <a href="?mode=rateplans" class="action-btn btn-disabled btn-large">Cancelar</a>
+        {% endif %}
+      </div>
+
+      <div id="rateplanHint" class="status-text text-gray" style="margin-top:10px;">
+        Completa todos los campos para habilitar el botón.
+      </div>
+
+      <div id="autoUnitHint" class="status-text text-gray" style="margin-top:6px;">
+        Selecciona cliente y unidad. Para Taller la unidad se fuerza a Noche.
+      </div>
+    </form>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Listado de tarifas</div>
+      <div class="table-wrap rateplans-scroll">
+        <div class="rateplans-scroll-inner">
+          <table class="simple rateplans-table" style="min-width: 340px;">
+
+            <thead>
+              <tr>
+                <th>Vehículo</th>
+                <th>Cliente</th>
+                <th>Unidad</th>
+                <th>Día</th>
+                <th>Precio</th>
+                <th class="col-actions">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for rp in rateplans %}
+                <tr>
+                  <td>{{ rp.vehicle_type.name }}</td>
+                  <td>{{ rp.get_client_kind_display }}</td>
+                  <td>{{ rp.get_billing_unit_display }}</td>
+                  <td>{{ rp.get_day_type_display }}</td>
+                  <td>{{ rp.price_cop|floatformat:0 }}</td>
+                  <td class="col-actions">
+                    <div class="row-actions">
+                      <a href="?mode=rateplans&id={{ rp.id }}" class="link-action">Editar</a>
+                    </div>
+                  </td>
+                </tr>
+              {% empty %}
+                <tr>
+                  <td colspan="6" style="padding:12px; color:var(--text-muted);">No hay tarifas registradas.</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    <div style="margin-top:10px; color:var(--text-muted); font-size:0.85rem;">
+      Nota:
+      <b>Parqueadero</b> permite <b>Hora/Fracción</b> y <b>Noche</b>.
+      <b>Taller</b> solo permite <b>Noche</b>.
+      Además, cada tarifa se define por <b>Normal / Domingo / Festivo</b>.
+    </div>
+  </div>
+
+  <script>
+    (function setupRatePlan(){
+      const form = document.getElementById("rateplanForm");
+      if(!form) return;
+
+      const vVehicle = form.querySelector('[name="vehicle_type"]');
+      const vClient  = form.querySelector('[name="client_kind"]');
+      const vUnit    = form.querySelector('[name="billing_unit"]');
+      const vDay     = form.querySelector('[name="day_type"]');
+      const vPrice   = form.querySelector('[name="price_cop"]');
+
+      const submit = document.getElementById("rateplanSubmit");
+      const hint = document.getElementById("rateplanHint");
+      const autoHint = document.getElementById("autoUnitHint");
+
+      function getValueByLabel(selectEl, labelText){
+        if(!selectEl) return null;
+        const target = (labelText || "").trim().toLowerCase();
+        const opts = Array.from(selectEl.options || []);
+        const hit = opts.find(o => (o.textContent || "").trim().toLowerCase() === target);
+        return hit ? hit.value : null;
+      }
+
+      const CK_PARQUEADERO = getValueByLabel(vClient, "Parqueadero");
+      const CK_TALLER      = getValueByLabel(vClient, "Taller");
+
+      let BU_HORA_FRAC = getValueByLabel(vUnit, "Hora/Fracción");
+      if(!BU_HORA_FRAC) BU_HORA_FRAC = getValueByLabel(vUnit, "Hora / Fracción");
+      const BU_NOCHE = getValueByLabel(vUnit, "Noche");
+
+      function applyUnitRule(){
+        if(!vClient || !vUnit) return;
+
+        const ck = (vClient.value || "").trim();
+
+        if(!ck){
+          vUnit.disabled = false;
+          if(autoHint) autoHint.textContent = "Selecciona el tipo de cliente para ajustar la unidad.";
+          return;
+        }
+
+        if(CK_TALLER && ck === CK_TALLER){
+          if(BU_NOCHE) vUnit.value = BU_NOCHE;
+          vUnit.disabled = true;
+          if(autoHint) autoHint.textContent = "Taller: unidad forzada a Noche.";
+          return;
+        }
+
+        if(CK_PARQUEADERO && ck === CK_PARQUEADERO){
+          vUnit.disabled = false;
+          if(!vUnit.value && BU_HORA_FRAC) vUnit.value = BU_HORA_FRAC;
+          if(autoHint) autoHint.textContent = "Parqueadero: puedes elegir Hora/Fracción o Noche.";
+          return;
+        }
+
+        vUnit.disabled = false;
+        if(autoHint) autoHint.textContent = "Selecciona cliente y unidad.";
+      }
+
+      function setEnabled(on){
+        submit.disabled = !on;
+        submit.classList.toggle("btn-active", on);
+        submit.classList.toggle("btn-disabled", !on);
+        if(hint){
+          hint.textContent = on ? "Listo: puedes guardar." : "Completa todos los campos para habilitar el botón.";
+          hint.className = "status-text " + (on ? "text-green" : "text-gray");
+        }
+      }
+
+      function isFilled(el){
+        if(!el) return false;
+        const val = (el.value || "").trim();
+        return val.length > 0 && val !== "---------" && val !== "__none__";
+      }
+
+      function validate(){
+        applyUnitRule();
+
+        const priceVal = (vPrice?.value || "").toString().trim();
+        const priceNum = Number(priceVal.replace(/\./g,''));
+
+        const ok =
+          isFilled(vVehicle) &&
+          isFilled(vClient) &&
+          isFilled(vUnit) &&
+          isFilled(vDay) &&
+          priceVal.length > 0 &&
+          !Number.isNaN(priceNum) &&
+          priceNum > 0;
+
+        setEnabled(ok);
+      }
+
+      setEnabled(false);
+      applyUnitRule();
+      validate();
+
+      [vVehicle, vClient, vUnit, vDay, vPrice].forEach(el => {
+        if(!el) return;
+        el.addEventListener("input", validate);
+        el.addEventListener("change", validate);
+        el.addEventListener("blur", validate);
+      });
+    })();
+  </script>
+{% endif %}
+<!-- ========================= -->
+<!-- ✅ MODO: CLIENTES MENSUALES -->
+<!-- ========================= -->
+{% if mode == 'monthly' %}
+  <a href="?mode=menu" class="back-link">← Volver al Menú</a>
+  <div class="card-title">Clientes mensuales</div>
+
+  <!-- ✅ AJUSTES SOLO PARA ESTE APARTADO -->
+  <style>
+  /* =========================================================
+     ✅ ESTILO "FACTURA ELECTRÓNICA" APLICADO A ESTE BLOQUE
+     (sin tocar lo demás del template)
+     ========================================================= */
+
+  /* Contenedor tipo card (mismo look del panel operario) */
+  .monthly-card-like{
+    background: var(--bg-white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 22px;
+    box-shadow: var(--shadow-card);
+    width: 100%;
+  }
+
+  /* Títulos de panel alineados al estilo */
+  .monthly-panel-title{
+    font-weight: 900;
+    font-size: 0.95rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: .3px;
+    margin: 0 0 12px 0;
+  }
+
+  /* Inputs/Selects: mismo estilo pro */
+  .monthly-scope label{
+    font-size: 0.9rem;
+    font-weight: 700;
+    margin-bottom: 6px;
+    display: block;
+    color: var(--text-main);
+  }
+  .monthly-scope input[type="text"],
+  .monthly-scope input[type="email"],
+  .monthly-scope select{
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #d2ddec;
+    border-radius: 8px;
+    font-size: 1rem;
+    background-color: #fff;
+    max-width: 100%;
+  }
+  .monthly-scope input:focus,
+  .monthly-scope select:focus{
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(44, 123, 229, 0.10);
+  }
+
+  /* Errores: mismo patrón */
+  .monthly-scope .input-error{
+    border-color: #dc3545 !important;
+    background-color: #fff8f8;
+  }
+  .monthly-scope .error-msg{
+    color: #dc3545;
+    font-size: 0.8rem;
+    font-weight: bold;
+    display: none;
+    margin-top: 4px;
+  }
+
+  /* Hint/Chip estilo factura */
+  .monthly-scope .hint-chip{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    font-size:0.78rem;
+    font-weight:800;
+    padding:4px 10px;
+    border-radius:999px;
+    border:1px solid var(--border);
+    background:#f8f9fa;
+    color:var(--text-muted);
+    margin-top:8px;
+  }
+  .monthly-scope .hint-chip.ok{
+    background:#eafaf1;
+    border-color:#c7f2d9;
+    color:#1f7a45;
+  }
+  .monthly-scope .hint-chip.warn{
+    background:#fff7e6;
+    border-color:#ffe6b8;
+    color:#b7791f;
+  }
+
+  /* Separador dashed como en recibos */
+  .monthly-scope .monthly-dashed{
+    border-top: 1px dashed #d2ddec;
+    margin: 14px 0;
+  }
+
+  /* =========================================================
+     ✅ TUS AJUSTES ORIGINALES (TABLA + SCROLL)
+     ✅ FIX Safari: separar scroll X (wrapper) del scroll Y (inner)
+     ========================================================= */
+
+  /* ====== CLIENTES MENSUALES: compactar columnas + scroll tras 4 ====== */
+  .monthly-table{
+    width: 100%;
+    min-width: 340px;
+    table-layout: auto;
+
+    /* ✅ ayuda a Safari con sticky */
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  /* Reduce padding SOLO en esta tabla */
+  .monthly-table th,
+  .monthly-table td{
+    padding: 8px 10px;
+    white-space: nowrap;
+  }
+
+  /* "Registrado" no se estira de más */
+  .monthly-table th:nth-child(2),
+  .monthly-table td:nth-child(2){
+    width: 1%;
+  }
+
+  /* Acciones más pegado a "Registrado" */
+  .monthly-table th.col-actions,
+  .monthly-table td.col-actions{
+    width: 1%;
+    padding-left: 6px;   /* 👈 reduce hueco */
+    padding-right: 6px;
+    text-align: right;
+  }
+
+  /* Botones compactos */
+  .monthly-table .row-actions{
+    display: inline-flex;
+    justify-content: flex-end;
+    gap: 6px;
+    flex-wrap: nowrap;
+  }
+
+  /* ✅ Scroll horizontal (solo X) */
+  .monthly-scroll-x{
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* ✅ Scroll vertical después de ~4 registros (solo Y) */
+  .monthly-scroll-y{
+    max-height: 210px;   /* ajusta 190-230 según tu alto de filas */
+    overflow-y: auto;
+    overflow-x: hidden; /* ✅ clave: NO mezclar ejes aquí */
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Header fijo mientras haces scroll vertical */
+  .monthly-scroll-y thead th{
+    position: sticky;
+    top: 0;
+    background: #fff;
+    z-index: 3;
+  }
+
+  /* =========================================================
+     ✅ MODAL: look & feel tipo factura (sin romper tu modal)
+     ========================================================= */
+  .monthly-modal-card{
+    max-width:520px;
+    margin:40px auto;
+    background:#fff;
+    border-radius:14px;
+    border:1px solid var(--border);
+    padding:16px;
+    box-shadow: var(--shadow-card);
+  }
+
+  .monthly-modal-title{
+    font-weight:900;
+    font-size:1.1rem;
+    color: var(--text-main);
+  }
+</style>
+
+
+  <!-- ✅ scope para no tocar otras secciones -->
+  <div class="monthly-scope">
+
+    <div class="monthly-card-like">
+      <div class="monthly-panel-title">Registrar placa</div>
+
+      <form method="post" id="monthlyAddForm" action="{% url 'parking:monthly_add' %}" autocomplete="off">
+        {% csrf_token %}
+
+        <div style="grid-column:1 / -1;">
+          <label for="monthlyPlate">Placa</label>
+          <input
+              type="text"
+              id="monthlyPlate"
+              name="plate"
+              placeholder="Ej: ABC123"
+              style="text-transform:uppercase;"
+          />
+
+          <div id="monthlyPlateErrorFormat" class="error-msg" style="display:none;">
+            Formato inválido. Usa solo letras y números (mínimo 5 caracteres).
+          </div>
+          <div id="monthlyPlateErrorExists" class="error-msg" style="display:none;">
+            Esta placa ya está registrada como mensual.
+          </div>
+
+          <!-- ✅ hint con chip -->
+          <div id="monthlyPlateHint" class="hint-chip warn" style="display:inline-flex;">
+            Escribe la placa y valida para habilitar “Guardar”.
+          </div>
+        </div>
+
+        <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;">
+          <button type="submit" id="monthlySaveBtn" class="action-btn btn-disabled btn-large" disabled>
+            Guardar
+          </button>
+        </div>
+      </form>
+
+      <div class="monthly-dashed"></div>
+
+      <div class="hint-box">
+        * Esto solo guarda la placa como “mensual”. El cobro se hace desde la tabla.
+      </div>
+    </div>
+
+    <div style="height:14px;"></div>
+
+    <div class="monthly-card-like">
+      <div class="monthly-panel-title">Placas registradas ({{ monthly_rows|length }})</div>
+
+      {% if monthly_rows %}
+        <div class="table-wrap monthly-wrap">
+          <div class="monthly-scroll-x">
+            <div class="monthly-scroll-y">
+              <table class="simple monthly-table">
+
+                <thead>
+                  <tr>
+                    <th>Placa</th>
+                    <th>Registrado</th>
+                    <th class="col-actions">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for it in monthly_rows %}
+                    <tr>
+                      <td style="font-weight:900;" class="uppercase">{{ it.plate }}</td>
+                      <td style="font-family:monospace;">
+                        {% if it.created_at %}{{ it.created_at|date:"Y-m-d H:i" }}{% else %}—{% endif %}
+                      </td>
+                      <td class="col-actions">
+                        <div class="row-actions">
+                          <!-- COBRAR -->
+                          <button type="button"
+                                  class="action-btn btn-mini btn-active"
+                                  onclick="openMonthlyCharge('{{ it.id }}', '{{ it.plate|escapejs }}')">
+                            Cobrar
+                          </button>
+
+                          <!-- ELIMINAR -->
+                          <form method="post"
+                                action="{% url 'parking:monthly_delete' it.id %}?next={{ request.get_full_path|urlencode }}"
+                                style="display:inline;">
+                            {% csrf_token %}
+                            <button type="submit"
+                                    class="action-btn btn-mini btn-danger"
+                                    onclick="return confirm('¿Eliminar la placa mensual {{ it.plate }}?');">
+                              Eliminar
+                            </button>
+                          </form>
+                        </div>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      {% else %}
+        <div style="padding:18px; color:var(--text-muted); font-style:italic;">
+          No hay placas mensuales registradas.
+        </div>
+      {% endif %}
+    </div>
+
+    <!-- ========================= -->
+    <!-- MODAL: COBRAR MENSUAL -->
+    <!-- ========================= -->
+    <div id="monthlyChargeModal"
+         style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.35); z-index:9999; padding:20px;">
+      <div class="monthly-modal-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+          <div class="monthly-modal-title">Cobrar mensual</div>
+          <button type="button" class="action-btn btn-mini btn-outline" onclick="closeMonthlyCharge()">
+            Cerrar
+          </button>
+        </div>
+
+        <div class="dashed-line"></div>
+
+        <form method="post" id="monthlyChargeForm" action="" autocomplete="off">
+          {% csrf_token %}
+
+          <!-- ✅ card look (sin cambiar tu estructura interna) -->
+          <div class="monthly-card-like" style="margin:0; padding:16px; box-shadow:none;">
+            <div class="row">
+              <span class="label">PLACA:</span>
+              <span class="bold uppercase" id="monthlyChargePlate">—</span>
+            </div>
+
+            <div style="margin-top:10px;">
+              <label for="monthlyAmount">Valor (COP)</label>
+              <input type="text"
+                     id="monthlyAmount"
+                     name="amount_cop"
+                     placeholder="Ej: 120000">
+              <div id="monthlyAmountErr" class="error-msg" style="display:none;">
+                Ingresa un valor válido mayor a 0.
+              </div>
+            </div>
+
+            <div style="margin-top:10px;">
+              <label for="monthlyMethod">Método</label>
+              <select id="monthlyMethod" name="method" required>
+                <option value="" selected disabled>— Selecciona una opción —</option>
+                <option value="CASH">Efectivo</option>
+                <option value="TRANSFER">Transferencia</option>
+              </select>
+            </div>
+
+            <div id="monthlyTransferBox" style="display:none; margin-top:10px;">
+              <label for="monthlyTransferRef">Referencia transferencia</label>
+              <input type="text"
+                     id="monthlyTransferRef"
+                     name="transfer_ref"
+                     placeholder="Ref">
+            </div>
+
+            <div class="monthly-dashed"></div>
+
+            <!-- ✅ Factura electrónica (MISMO PATRÓN VISUAL) -->
+            <div style="margin-top:6px;">
+              <div style="font-weight:900; margin-bottom:6px; color:var(--text-main);">Factura electrónica</div>
+              <select id="monthlyInvoiceRequired" name="invoice_required" required>
+                <option value="" selected disabled>— Selecciona una opción —</option>
+                <option value="NO">No</option>
+                <option value="YES">Sí</option>
+              </select>
+            </div>
+
+            <div id="monthlyInvoiceFields" style="display:none; margin-top:10px;">
+              <div class="grid-2">
+                <div>
+                  <label for="monthlyInvoiceId">Cédula o NIT</label>
+                  <input type="text"
+                         id="monthlyInvoiceId"
+                         name="id_number"
+                         placeholder="Solo números">
+                  <span id="monthlyCustomerHint" class="hint-chip" style="display:none;"></span>
+                  <div id="monthlyInvIdErr" class="error-msg" style="display:none;">Ingresa cédula/NIT.</div>
+                </div>
+
+                <div>
+                  <label for="monthlyInvoiceName">Nombre / Razón social</label>
+                  <input type="text"
+                         id="monthlyInvoiceName"
+                         name="full_name"
+                         placeholder="Nombre">
+                  <div id="monthlyInvNameErr" class="error-msg" style="display:none;">Ingresa el nombre.</div>
+                </div>
+
+                <div style="grid-column:1 / -1;">
+                  <label for="monthlyInvoiceEmail">Correo</label>
+                  <input type="email"
+                         id="monthlyInvoiceEmail"
+                         name="email"
+                         placeholder="usuario@dominio.com">
+                  <div id="monthlyInvEmailErr" class="error-msg" style="display:none;">Ingresa un correo válido.</div>
+                </div>
+              </div>
+            </div>
+
+            <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
+              <button type="submit" id="monthlyChargeSubmit" class="action-btn btn-disabled btn-large" disabled>
+                Generar recibo
+              </button>
+            </div>
+
+            <!-- ✅ hint estilo chip -->
+            <div id="monthlyChargeHint" class="hint-chip warn" style="display:inline-flex; margin-top:10px;">
+              Ingresa el valor para habilitar el botón.
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+  </div> <!-- /monthly-scope -->
+
+  <script>
+    function normalizePlate(s){
+      return (s || "").toString().trim().toUpperCase().replace(/\s+/g, "");
+    }
+    function isAlnumPlate(p){
+      return /^[A-Z0-9]{5,}$/.test(p || "");
+    }
+    function show(el, on){
+      if(!el) return;
+      el.style.display = on ? "" : "none";
+    }
+    function setBtnState(btn, enabled){
+      if(!btn) return;
+      btn.disabled = !enabled;
+      btn.classList.toggle("btn-active", enabled);
+      btn.classList.toggle("btn-disabled", !enabled);
+    }
+    function parseNum(s){
+      return Number(String(s||"").replace(/[^\d]/g,"") || 0);
+    }
+    function fmt(n){
+      try{ return Number(n||0).toLocaleString("es-CO"); }catch(e){ return String(n||0); }
+    }
+    function isValidEmail(v){
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((v||"").trim());
+    }
+
+    // helpers para hint-chip
+    function setChip(el, kind, text){
+      if(!el) return;
+      el.textContent = text || "";
+      el.className = "hint-chip" + (kind ? (" " + kind) : "");
+      el.style.display = text ? "inline-flex" : "none";
+    }
+
+    // ---------- REGISTRAR PLACA (validación + check existente) ----------
+    (function setupMonthlyAdd(){
+      const form = document.getElementById("monthlyAddForm");
+      if(!form) return;
+
+      const plateInput = document.getElementById("monthlyPlate");
+      const saveBtn = document.getElementById("monthlySaveBtn");
+      const errFmt = document.getElementById("monthlyPlateErrorFormat");
+      const errExists = document.getElementById("monthlyPlateErrorExists");
+      const hint = document.getElementById("monthlyPlateHint");
+
+      async function validate(){
+        const p = normalizePlate(plateInput.value);
+
+        if(!p){
+          show(errFmt, false);
+          show(errExists, false);
+          setChip(hint, "warn", "Escribe la placa y valida para habilitar “Guardar”.");
+          setBtnState(saveBtn, false);
+          return;
+        }
+
+        if(!isAlnumPlate(p)){
+          show(errFmt, true);
+          show(errExists, false);
+          setChip(hint, "warn", "Corrige el formato de la placa.");
+          setBtnState(saveBtn, false);
+          return;
+        }
+
+        show(errFmt, false);
+
+        try{
+          const params = new URLSearchParams({ mode: "monthly_check", plate: p });
+          const res = await fetch(`?${params.toString()}`, {
+            headers: { "X-Requested-With": "XMLHttpRequest" }
+          });
+          const data = await res.json();
+
+          if(data && data.exists){
+            show(errExists, true);
+            setChip(hint, "warn", "Esta placa ya existe.");
+            setBtnState(saveBtn, false);
+          }else{
+            show(errExists, false);
+            setChip(hint, "ok", "Listo: puedes guardar.");
+            setBtnState(saveBtn, true);
+          }
+        }catch(e){
+          console.error(e);
+          show(errExists, false);
+          setChip(hint, "warn", "No se pudo verificar en línea. Puedes guardar.");
+          setBtnState(saveBtn, true);
+        }
+      }
+
+      plateInput.addEventListener("blur", validate);
+      plateInput.addEventListener("keydown", (e) => {
+        if(e.key === "Enter"){
+          e.preventDefault();
+          validate();
+        }
+      });
+      plateInput.addEventListener("input", () => {
+        plateInput.value = normalizePlate(plateInput.value);  // ✅ MAYÚSCULAS + sin espacios
+        show(errFmt, false);
+        show(errExists, false);
+        setBtnState(saveBtn, false);
+        setChip(hint, "warn", "Escribe la placa y valida para habilitar “Guardar”.");
+      });
+
+      form.addEventListener("submit", () => {
+        plateInput.value = normalizePlate(plateInput.value);
+      });
+    })();
+
+    // ---------- MODAL COBRO ----------
+    function openMonthlyCharge(id, plate){
+      const modal = document.getElementById("monthlyChargeModal");
+      const plateLbl = document.getElementById("monthlyChargePlate");
+      const form = document.getElementById("monthlyChargeForm");
+
+      const amt = document.getElementById("monthlyAmount");
+      const method = document.getElementById("monthlyMethod");
+      const refBox = document.getElementById("monthlyTransferBox");
+      const ref = document.getElementById("monthlyTransferRef");
+
+      const invSel = document.getElementById("monthlyInvoiceRequired");
+      const invFields = document.getElementById("monthlyInvoiceFields");
+      const invId = document.getElementById("monthlyInvoiceId");
+      const invName = document.getElementById("monthlyInvoiceName");
+      const invEmail = document.getElementById("monthlyInvoiceEmail");
+
+      const btn = document.getElementById("monthlyChargeSubmit");
+      const hint = document.getElementById("monthlyChargeHint");
+      const err = document.getElementById("monthlyAmountErr");
+
+      plateLbl.textContent = normalizePlate(plate || "");
+      form.action = "{% url 'parking:monthly_charge' 0 %}".replace("/0/", "/" + id + "/");
+
+      amt.value = "";
+      method.value = "";
+      ref.value = "";
+      show(refBox, false);
+      show(err, false);
+
+      // reset factura (inputs visibles)
+      invSel.value = "";
+      show(invFields, false);
+      invId.value = "";
+      invName.value = "";
+      invEmail.value = "";
+
+      // ✅ reset ALSO el estado interno del lookup (chip + verifiedId/customerFound)
+      if (typeof window.resetMonthlyInvoiceLookupState === "function") {
+        window.resetMonthlyInvoiceLookupState();
+      } else {
+        // fallback: al menos limpia chip si aún no se definió la función
+        const customerHint = document.getElementById("monthlyCustomerHint");
+        setChip(customerHint, "", "");
+      }
+
+      // reset errores factura
+      const e1 = document.getElementById("monthlyInvIdErr");
+      const e2 = document.getElementById("monthlyInvNameErr");
+      const e3 = document.getElementById("monthlyInvEmailErr");
+      show(e1, false); show(e2, false); show(e3, false);
+
+      setChip(hint, "warn", "Ingresa el valor para habilitar el botón.");
+      setBtnState(btn, false);
+
+      show(modal, true);
+      setTimeout(() => amt.focus(), 50);
+    }
+
+    function closeMonthlyCharge(){
+      const modal = document.getElementById("monthlyChargeModal");
+      show(modal, false);
+    }
+
+    (function setupMonthlyCharge(){
+      const form = document.getElementById("monthlyChargeForm");
+      if(!form) return;
+
+      const amt = document.getElementById("monthlyAmount");
+      const method = document.getElementById("monthlyMethod");
+      const refBox = document.getElementById("monthlyTransferBox");
+      const ref = document.getElementById("monthlyTransferRef");
+
+      const invSel = document.getElementById("monthlyInvoiceRequired");
+      const invFields = document.getElementById("monthlyInvoiceFields");
+      const invId = document.getElementById("monthlyInvoiceId");
+      const invName = document.getElementById("monthlyInvoiceName");
+      const invEmail = document.getElementById("monthlyInvoiceEmail");
+
+      const invIdErr = document.getElementById("monthlyInvIdErr");
+      const invNameErr = document.getElementById("monthlyInvNameErr");
+      const invEmailErr = document.getElementById("monthlyInvEmailErr");
+
+      const customerHint = document.getElementById("monthlyCustomerHint");
+
+      const btn = document.getElementById("monthlyChargeSubmit");
+      const hint = document.getElementById("monthlyChargeHint");
+      const err = document.getElementById("monthlyAmountErr");
+
+      // ====== estado lookup cliente ======
+      let customerFound = false;
+      let verifiedId = ""; // id_number verificado (cuando exists)
+
+      function normalizeId(s){
+        return (s || "").toString().trim().replace(/[^\d]/g, "");
+      }
+
+      // ====== mostrar/ocultar name/email según exista o no ======
+      function applyInvoiceCustomerUI(){
+        const inv = (invSel.value || "").trim();
+        if(inv !== "YES"){
+          setChip(customerHint, "", "");
+          show(invName?.closest("div"), false);
+          show(invEmail?.closest("div"), false);
+          return;
+        }
+
+        const idv = (invId?.value || "").trim();
+        if(!idv){
+          setChip(customerHint, "", "");
+          show(invName?.closest("div"), false);
+          show(invEmail?.closest("div"), false);
+          return;
+        }
+
+        const isVerifiedFound = customerFound && verifiedId && verifiedId === idv;
+
+        if(isVerifiedFound){
+          // ✅ existe -> no pedir nada, solo chip
+          setChip(customerHint, "ok", "Cliente encontrado ✓");
+          show(invName?.closest("div"), false);
+          show(invEmail?.closest("div"), false);
+
+          show(invNameErr, false);
+          show(invEmailErr, false);
+          invEmail && invEmail.classList.remove("input-error");
+        }else{
+          // ✅ no existe -> pedir datos
+          setChip(customerHint, "warn", "Cliente no existe: completa nombre y correo");
+          show(invName?.closest("div"), true);
+          show(invEmail?.closest("div"), true);
+        }
+      }
+
+      function clearCustomerFields(keepId){
+        customerFound = false;
+        verifiedId = "";
+        if(invName) invName.value = "";
+        if(invEmail) invEmail.value = "";
+        if(!keepId && invId) invId.value = "";
+        invEmail && invEmail.classList.remove("input-error");
+        setChip(customerHint, "", "");
+        applyInvoiceCustomerUI();
+      }
+
+      function toggleTransfer(){
+        const m = (method.value || "").trim();
+        if(m === "TRANSFER"){
+          show(refBox, true);
+        }else{
+          show(refBox, false);
+          if(ref) ref.value = "";
+        }
+      }
+
+      function toggleInvoice(){
+        const v = (invSel.value || "").trim();
+        if(v === "YES"){
+          show(invFields, true);
+        }else{
+          show(invFields, false);
+          clearCustomerFields(false);
+          show(invIdErr, false);
+          show(invNameErr, false);
+          show(invEmailErr, false);
+        }
+        applyInvoiceCustomerUI();
+      }
+
+      // ✅ Permite que openMonthlyCharge() resetee el estado del chip/cliente
+      window.resetMonthlyInvoiceLookupState = function(){
+        customerFound = false;
+        verifiedId = "";
+
+        if(invName) invName.value = "";
+        if(invEmail) invEmail.value = "";
+        if(invEmail) invEmail.classList.remove("input-error");
+
+        setChip(customerHint, "", "");
+
+        applyInvoiceCustomerUI();
+        validate();
+      };
+
+      // ====== lookup AJAX (igual que operario) ======
+      async function lookupCustomer(){
+        const inv = (invSel.value || "").trim();
+        if(inv !== "YES") return;
+
+        const idv = normalizeId(invId?.value || "");
+        if(invId) invId.value = idv;
+
+        if(!idv){
+          clearCustomerFields(true);
+          validate();
+          return;
+        }
+
+        // feedback
+        setChip(customerHint, "", "Buscando cliente...");
+        customerFound = false;
+        verifiedId = "";
+        applyInvoiceCustomerUI();
+        validate();
+
+        try{
+          const params = new URLSearchParams({ mode: "lookup_customer", id: idv });
+          const res = await fetch(`?${params.toString()}`, {
+            headers: { "X-Requested-With": "XMLHttpRequest" }
+          });
+          const data = await res.json();
+
+          // si cambió mientras buscaba, ignora
+          if(((invId?.value || "").trim()) !== idv) return;
+
+          if(data && data.found){
+            customerFound = true;
+            verifiedId = idv;
+
+            // llenamos por si el backend los usa (aunque se oculten)
+            if(invName) invName.value = data.full_name || "";
+            if(invEmail) invEmail.value = data.email || "";
+
+            setChip(customerHint, "ok", "Cliente encontrado ✓");
+          }else{
+            customerFound = false;
+            verifiedId = "";
+            if(invName) invName.value = "";
+            if(invEmail) invEmail.value = "";
+            setChip(customerHint, "warn", "Cliente no existe: completa nombre y correo");
+          }
+        }catch(e){
+          console.error(e);
+          customerFound = false;
+          verifiedId = "";
+          if(invName) invName.value = "";
+          if(invEmail) invEmail.value = "";
+          setChip(customerHint, "warn", "No se pudo verificar. Completa nombre y correo");
+        }
+
+        applyInvoiceCustomerUI();
+        validate();
+      }
+
+      function validate(){
+        const v = parseNum(amt.value);
+        const m = (method.value || "").trim();
+        const refOk = (m !== "TRANSFER") || ((ref?.value || "").trim().length > 0);
+
+        // monto
+        if(v <= 0){
+          show(err, true);
+          setChip(hint, "warn", "Ingresa un valor válido mayor a 0.");
+          setBtnState(btn, false);
+          return;
+        }
+        show(err, false);
+
+        // método requerido (ahora no hay default)
+        if(!m){
+          setChip(hint, "warn", "Selecciona un método de pago.");
+          setBtnState(btn, false);
+          return;
+        }
+
+        // transferencia
+        if(!refOk){
+          setChip(hint, "warn", "Escribe la referencia de transferencia.");
+          setBtnState(btn, false);
+          return;
+        }
+
+        // factura requerida (ahora no hay default)
+        const inv = (invSel.value || "").trim();
+        if(!inv){
+          setChip(hint, "warn", "Selecciona si requiere factura electrónica.");
+          setBtnState(btn, false);
+          return;
+        }
+
+        if(inv === "YES"){
+          const idv = (invId?.value || "").trim();
+          const isVerifiedFound = customerFound && verifiedId && verifiedId === idv;
+
+          // id obligatorio
+          show(invIdErr, !idv);
+          if(!idv){
+            setChip(hint, "warn", "Ingresa cédula/NIT.");
+            setBtnState(btn, false);
+            applyInvoiceCustomerUI();
+            return;
+          }
+
+          if(!isVerifiedFound){
+            // si NO existe -> exigir nombre/email
+            const nv = (invName?.value || "").trim();
+            const ev = (invEmail?.value || "").trim();
+
+            show(invNameErr, !nv);
+            show(invEmailErr, !isValidEmail(ev));
+            invEmail && invEmail.classList.toggle("input-error", ev.length > 0 && !isValidEmail(ev));
+
+            if(!nv || !isValidEmail(ev)){
+              setChip(hint, "warn", "Completa los datos de factura electrónica.");
+              setBtnState(btn, false);
+              applyInvoiceCustomerUI();
+              return;
+            }
+          }else{
+            // existe -> no pedir name/email
+            show(invNameErr, false);
+            show(invEmailErr, false);
+            invEmail && invEmail.classList.remove("input-error");
+          }
+        }else{
+          // NO
+          show(invIdErr, false);
+          show(invNameErr, false);
+          show(invEmailErr, false);
+          invEmail && invEmail.classList.remove("input-error");
+        }
+
+        setChip(hint, "ok", "Listo: se generará el recibo al cobrar.");
+        setBtnState(btn, true);
+        applyInvoiceCustomerUI();
+      }
+
+      // ====== listeners ======
+      // monto
+      amt.addEventListener("blur", () => {
+        const vv = parseNum(amt.value);
+        amt.value = vv > 0 ? fmt(vv) : "";
+        validate();
+      });
+      amt.addEventListener("input", validate);
+
+      // método
+      method.addEventListener("change", () => { toggleTransfer(); validate(); });
+      ref && ref.addEventListener("input", validate);
+
+      // factura
+      invSel.addEventListener("change", () => {
+        toggleInvoice();
+        validate();
+
+        // opcional: enfocar cédula al elegir "Sí"
+        if ((invSel.value || "").trim() === "YES") {
+          setTimeout(() => invId && invId.focus(), 50);
+        }
+      });
+
+      // id_number: normaliza, invalida estado si cambia, lookup en blur
+      if(invId){
+        invId.addEventListener("input", () => {
+          const cur = normalizeId(invId.value);
+          invId.value = cur;
+
+          // si cambió respecto a lo verificado, invalida y vuelve a pedir verificación
+          if(verifiedId && cur !== verifiedId){
+            customerFound = false;
+            verifiedId = "";
+            if(invName) invName.value = "";
+            if(invEmail) invEmail.value = "";
+            setChip(customerHint, "warn", cur ? "Cédula/NIT cambió: verifica (sal del campo)" : "");
+          }else if(!verifiedId){
+            // si no hay verificado, pero está escribiendo, mostrar aviso
+            setChip(customerHint, cur ? "warn" : "", cur ? "Verifica cédula/NIT (sal del campo)" : "");
+          }
+
+          applyInvoiceCustomerUI();
+          validate();
+        });
+
+        invId.addEventListener("keydown", (e) => {
+          if(e.key === "Enter"){
+            e.preventDefault();
+            invId.blur(); // dispara lookup
+          }
+        });
+
+        invId.addEventListener("blur", lookupCustomer);
+      }
+
+      invName && invName.addEventListener("input", validate);
+      invEmail && invEmail.addEventListener("input", validate);
+
+      // init
+      toggleTransfer();
+      toggleInvoice();
+      applyInvoiceCustomerUI();
+      validate();
+
+      // submit: enviar monto limpio
+      form.addEventListener("submit", (e) => {
+        const vv = parseNum(amt.value);
+        if(vv <= 0){
+          e.preventDefault();
+          validate();
+          return;
+        }
+        amt.value = String(vv);
+        if(invId) invId.value = normalizeId(invId.value);
+      });
+    })();
+  </script>
+{% endif %}
+
+
+
+<!-- ========================= -->
+<!-- MODO 5: USUARIOS (OPERARIOS) -->
+<!-- ========================= -->
+{% if mode == 'users' %}
+  <a href="?mode=menu" class="back-link">← Volver al Menú</a>
+  <div class="card-title">{% if editing_user %}Editar Operario{% else %}Operarios{% endif %}</div>
+
+  <div class="panel">
+    <div class="panel-title">{% if editing_user %}Editar operario{% else %}Crear nuevo operario{% endif %}</div>
+
+    <form method="post" action="?mode=users{% if editing_user %}&id={{ editing_user.id }}{% endif %}">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="save_user">
+
+      <div class="grid-2">
+        <div>
+          <label for="{{ form.username.id_for_label }}">{{ form.username.label }}</label>
+          {{ form.username }}
+          {% if form.username.errors %}
+            <small style="color:#dc3545; font-weight:700;">{{ form.username.errors.0 }}</small>
+          {% endif %}
+        </div>
+
+        <div>
+          <label for="{{ form.first_name.id_for_label }}">{{ form.first_name.label }}</label>
+          {{ form.first_name }}
+          {% if form.first_name.errors %}
+            <small style="color:#dc3545; font-weight:700;">{{ form.first_name.errors.0 }}</small>
+          {% endif %}
+        </div>
+
+        <div>
+          <label for="{{ form.last_name.id_for_label }}">{{ form.last_name.label }}</label>
+          {{ form.last_name }}
+          {% if form.last_name.errors %}
+            <small style="color:#dc3545; font-weight:700;">{{ form.last_name.errors.0 }}</small>
+          {% endif %}
+        </div>
+
+        <div style="display:none;">
+          {{ form.is_active }}
+        </div>
+
+        {% if not editing_user %}
+          <div>
+            <label for="{{ form.password1.id_for_label }}">Contraseña</label>
+            {{ form.password1 }}
+          </div>
+          <div>
+            <label for="{{ form.password2.id_for_label }}">Confirmar contraseña</label>
+            {{ form.password2 }}
+          </div>
+        {% endif %}
+      </div>
+
+      {% if form.non_field_errors %}
+        <div style="margin-top:10px; color:#dc3545; font-weight:900;">
+          {{ form.non_field_errors }}
+        </div>
+      {% endif %}
+
+      <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;">
+        <button type="submit" class="action-btn btn-active btn-large">
+          {% if editing_user %}Guardar cambios{% else %}Crear{% endif %}
+        </button>
+
+        {% if editing_user %}
+          <a href="?mode=users" class="action-btn btn-disabled btn-large">Cancelar</a>
+        {% endif %}
+      </div>
+
+      <div class="hint-box">
+        * Se crean como usuarios normales (no staff). Inician sesión con <b>Usuario (login)</b> y contraseña.
+      </div>
+    </form>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Listado</div>
+
+    <div class="table-wrap users-scroll">
+      <div class="users-scroll-inner">
+        <table class="simple" style="min-width: 340px;">
+
+          <thead>
+            <tr>
+              <th>Usuario</th>
+              <th>Nombre</th>
+              <th class="col-actions">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for u in users %}
+              <tr>
+                <td>{{ u.username }}</td>
+                <td>{{ u.first_name }} {{ u.last_name }}</td>
+
+                <td class="col-actions">
+                  <div class="row-actions" style="justify-content:flex-start; gap:10px; flex-wrap:wrap;">
+                    <a class="link-action" href="?mode=users&id={{ u.id }}">Editar</a>
+
+                    <!-- ✅ CAMBIAR CLAVE (reemplaza Activar/Desactivar) -->
+                    <form method="post" action="?mode=users" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                      {% csrf_token %}
+                      <input type="hidden" name="action" value="set_password">
+                      <input type="hidden" name="user_id" value="{{ u.id }}">
+
+                      <div style="flex:1; min-width:160px;">
+                        <input type="password" name="password1" placeholder="Nueva contraseña" required>
+                      </div>
+                      <div style="flex:1; min-width:160px;">
+                        <input type="password" name="password2" placeholder="Confirmar" required>
+                      </div>
+
+                      <button type="submit" class="action-btn btn-mini btn-active">Cambiar clave</button>
+                    </form>
+                  </div>
+
+                  {% if password_form and password_form.non_field_errors %}
+                    <div style="margin-top:8px; color:#dc3545; font-weight:900;">
+                      {{ password_form.non_field_errors }}
+                    </div>
+                  {% endif %}
+                </td>
+
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="3" style="padding:12px; color:var(--text-muted);">No hay operarios registrados.</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+    {% endblock %}
+  </div>
+{% endblock %}

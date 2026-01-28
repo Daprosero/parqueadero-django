@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Recibo Empresa</title>
+    <style>
+        body {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 16px;            /* ✅ tamaño único global */
+            line-height: 1.28;
+            font-weight: 600;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+            text-rendering: geometricPrecision;
+            width: 80mm;
+            margin: 0 auto;
+            padding: 5px;
+            color: #000;
+            background: #fff;
+        }
+
+        /* 🔑 fuerza herencia total */
+        * { font-size: inherit; }
+
+        .no-print { margin-bottom: 15px; border-bottom: 1px solid #ccc; padding-bottom: 10px; text-align: center; }
+        button { cursor: pointer; padding: 8px 15px; font-weight: bold; border-radius: 5px; border: 1px solid #000; background:#fff; }
+
+        .text-center { text-align: center; }
+        .text-right { text-align: right; }
+        .bold { font-weight: bold; }
+        .uppercase { text-transform: uppercase; }
+
+        .header { margin-bottom: 10px; }
+        .business-name { font-weight: bold; margin-bottom: 2px; }
+
+        .dashed-line { border-bottom: 1px dashed #000; margin: 5px 0; display: block; width: 100%; }
+
+        .row { display: flex; justify-content: space-between; margin-bottom: 2px; gap: 10px; }
+        .row span:last-child { text-align: right; }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 5px; }
+        th { text-align: left; text-transform: uppercase; padding-bottom: 3px; }
+        td { vertical-align: top; padding: 2px 0; }
+
+        .small { font-size: 14px; font-weight: 600; }
+
+        @media print {
+            .no-print { display: none; }
+            body { margin: 0; zoom: 1; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Botones -->
+    <div class="no-print">
+        <button onclick="window.print()">🖨️ IMPRIMIR</button>
+        <a href="{% url 'parking:gestion' %}?mode=company_settle" style="text-decoration:none;">
+            <button type="button">⬅ Volver</button>
+        </a>
+    </div>
+
+    <!-- Encabezado Negocio -->
+    <div class="header text-center">
+        <div class="business-name uppercase">Parqueadero Los Cambulos</div>
+        <div>Nit: 75081166-3</div>
+        <div class="uppercase">Jorge Eliecer Quiceno</div>
+        <div>Correo: parqueaderoloscambulos@gmail.com</div>
+        <div>Cel: 312 277 5300</div>
+    </div>
+
+    <div class="dashed-line"></div>
+
+    <!-- Encabezado del Recibo -->
+    <div class="text-center" style="margin-bottom: 10px;">
+        <div class="business-name uppercase">Recibo Empresa</div>
+
+        {# ✅ si receipt.created_at viene como datetime, lo formateas aquí #}
+        <div class="bold">Fecha: {{ receipt.created_at }}</div>
+
+        {% if receipt.company %}
+            <div class="bold uppercase">{{ receipt.company.full_name }}</div>
+            {% if receipt.company.id_number %}
+                <div>NIT/CC: {{ receipt.company.id_number }}</div>
+            {% endif %}
+        {% endif %}
+    </div>
+
+    <div class="dashed-line"></div>
+
+    <!-- Datos de pago -->
+    <div class="row">
+        <span class="bold">Método:</span>
+        <span class="bold">
+            {% if receipt.method == "CASH" %}
+                Efectivo
+            {% elif receipt.method == "TRANSFER" %}
+                Transferencia
+            {% else %}
+                Crédito
+            {% endif %}
+        </span>
+    </div>
+
+    {% if receipt.method == "TRANSFER" and receipt.transfer_ref %}
+    <div class="row">
+        <span class="bold">Ref:</span>
+        <span class="bold">{{ receipt.transfer_ref }}</span>
+    </div>
+    {% endif %}
+
+    {% if receipt.invoice_required %}
+    <div class="row">
+        <span class="bold">Factura:</span>
+        <span class="bold">Sí</span>
+    </div>
+
+    {% if receipt.invoice %}
+        {% if receipt.invoice.id_number %}
+        <div class="row">
+            <span class="bold">Doc:</span>
+            <span class="bold">{{ receipt.invoice.id_number }}</span>
+        </div>
+        {% endif %}
+
+        {% if receipt.invoice.full_name %}
+        <div class="row">
+            <span class="bold">Nombre:</span>
+            <span class="bold">{{ receipt.invoice.full_name }}</span>
+        </div>
+        {% endif %}
+
+        {% if receipt.invoice.email %}
+        <div class="row">
+            <span class="bold">Correo:</span>
+            <span class="bold">{{ receipt.invoice.email }}</span>
+        </div>
+        {% endif %}
+    {% endif %}
+    {% endif %}
+
+    <div class="dashed-line"></div>
+
+    <!-- REGISTROS -->
+    <div class="text-center bold" style="margin-top: 6px;">--- REGISTROS ---</div>
+
+    <!-- TABLA: encabezado -->
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 22%;">Placa</th>
+                <th style="width: 39%;">Ingreso</th>
+                <th style="width: 39%;" class="text-right">Salida</th>
+            </tr>
+        </thead>
+    </table>
+
+    <div class="dashed-line"></div>
+
+    <!-- TABLA: filas -->
+    <table>
+        <tbody>
+            {% for t in tickets %}
+            <tr>
+                <td style="width: 22%;" class="bold uppercase">{{ t.plate }}</td>
+                <td style="width: 39%;" class="small">{{ t.check_in }}</td>
+                <td style="width: 39%;" class="small text-right">
+                    {% if t.check_out %}{{ t.check_out }}{% else %}-{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="dashed-line"></div>
+
+    <!-- TOTALES -->
+    <div class="row">
+        <span class="bold">Total Parqueadero:</span>
+        <span class="bold">
+            ${{ receipt.print_amount_parking|default:"0" }}
+        </span>
+    </div>
+
+    <div class="row">
+        <span class="bold">Total Servicios:</span>
+        <span class="bold">
+            ${{ receipt.print_amount_service|default:"0" }}
+        </span>
+    </div>
+
+    <div class="dashed-line"></div>
+
+    <div class="row" style="margin-top: 5px;">
+        <span class="bold">TOTAL GENERAL:</span>
+        <span class="bold">
+            ${{ receipt.print_amount_total|default:"0" }}
+        </span>
+    </div>
+
+    <div class="dashed-line" style="margin-top: 15px;"></div>
+
+    <div class="text-center bold" style="margin-top: 6px;">Gracias por su compra</div>
+
+    <div class="dashed-line" style="margin-bottom: 20px;"></div>
+
+    <div style="text-align:center;">.</div>
+
+</body>
+</html>

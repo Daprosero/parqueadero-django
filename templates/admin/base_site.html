@@ -35,6 +35,9 @@
     background-color: #ffffff !important;
     border-bottom: 2px solid #ddd;
     padding: 12px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
   }
 
   #branding {
@@ -50,40 +53,47 @@
     color: #000 !important;
   }
 
-  /* ===== NAV GLOBAL (Dashboard) ===== */
+  /* ===== NAV GLOBAL (Botones de navegación) ===== */
+  #nav-global {
+    margin-left: auto; 
+    margin-right: 20px;
+  }
+
   #nav-global a {
-    color: #000 !important;
-    font-weight: bold;
-    margin-right: 15px;
+    color: #2c7be5 !important; 
+    font-weight: 800;
+    margin-left: 15px; 
     text-decoration: none;
+    font-size: 13px;
+    border: 1px solid #2c7be5;
+    padding: 6px 12px;
+    border-radius: 10px;
+    transition: 0.2s;
   }
 
   #nav-global a:hover {
-    text-decoration: underline;
+    background-color: #2c7be5;
+    color: #ffffff !important;
+    text-decoration: none;
   }
 
-  /* ===== FIX DEFINITIVO: LOGOUT DJANGO (ES UN BOTÓN) ===== */
+  /* ===== FIX DEFINITIVO: LOGOUT DJANGO ===== */
+  #user-tools {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
   #user-tools,
   #user-tools * {
+    color: #666 !important; 
+  }
+
+  #user-tools strong {
     color: #000 !important;
-  }
-
-  #user-tools form {
-    margin: 0 !important;
-  }
-
-  #user-tools button {
-    background: transparent !important;
-    border: 0 !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    font: inherit !important;
-    cursor: pointer !important;
-    color: #000 !important;
-  }
-
-  #user-tools button:hover {
-    text-decoration: underline;
   }
 
   /* ===== FOOTER ===== */
@@ -101,9 +111,9 @@
 {% endblock %}
 
 {% block branding %}
-<div style="width:90px; height:90px; display:flex; align-items:center;">
+<div style="width:50px; height:50px; display:flex; align-items:center;">
   <img src="{% static 'img/logo.png' %}"
-       alt="Logo Parqueadero Los Cámbulos"
+       alt="Logo"
        style="max-width:100%; max-height:100%; object-fit:contain;">
 </div>
 
@@ -114,9 +124,22 @@
 </h1>
 {% endblock %}
 
-{# En admin SOLO mostramos Dashboard #}
 {% block nav-global %}
-<a href="{% url 'admin_dashboard' %}">Dashboard</a>
+  <!-- LÓGICA:
+       1. Estamos en ADMIN -> No mostramos botón Admin.
+       2. Mostramos DASHBOARD (Ajustado a parking:admin_dashboard).
+       3. Mostramos GESTIÓN (Ajustado a parking:gestion).
+  -->
+
+  <!-- Ir al Dashboard (Inicio) -->
+  <a href="{% url 'parking:admin_dashboard' %}">
+    Dashboard
+  </a>
+
+  <!-- Ir a Gestión (Panel Intuitivo) -->
+  <a href="{% url 'parking:gestion' %}">
+    Gestión
+  </a>
 {% endblock %}
 
 {% block footer %}

@@ -3,40 +3,58 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Parqueadero Los Cámbulos{% endblock %}</title>
 
   <style>
+    :root {
+      --primary: #2c7be5;
+      --primary-dark: #1a5bb8;
+      --bg-page: #f4f6f8;
+      --bg-white: #ffffff;
+      --border: #e3ebf6;
+      --text-main: #12263f;
+      --text-muted: #95aac9;
+      --radius: 12px;
+      --shadow-card: 0 10px 40px -10px rgba(18, 38, 63, 0.10);
+    }
+
     * { box-sizing: border-box; }
 
     body {
       margin: 0;
       font-family: Arial, Helvetica, sans-serif;
-      background-color: #f5f5f5;
+      background: var(--bg-page);
       min-height: 100vh;
       display: flex;
       flex-direction: column;
-      color: #000;
+      color: var(--text-main);
     }
 
+    /* ===== HEADER ===== */
     header {
-      background-color: #ffffff;
-      border-bottom: 2px solid #ddd;
-      padding: 12px 20px;
+      background: var(--bg-white);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 18px;
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 20px;
-      color: #000;
+      gap: 16px;
     }
 
-    header * { color: #000; }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
 
     .logo {
-      width: 90px;
-      height: 90px;
+      width: 56px;
+      height: 40px;
       display: flex;
       align-items: center;
       justify-content: center;
+      flex-shrink: 0;
     }
 
     .logo img {
@@ -46,131 +64,227 @@
     }
 
     .site-title {
-      font-size: 22px;
-      font-weight: bold;
-      color: #000;
+      font-size: 18px;
+      font-weight: 900;
+      letter-spacing: -0.2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
-    /* ===== NAV ADMIN (solo para staff) ===== */
-    .admin-nav {
+    /* ===== TOP ACTIONS (DERECHA) ===== */
+    .top-actions {
       display: flex;
       align-items: center;
-      gap: 14px;
-      margin-right: 12px;
+      gap: 12px;
+      margin-left: auto;
+      flex-shrink: 0;
     }
 
-    .admin-nav a {
-      font-weight: bold;
-      color: #000;
-      text-decoration: none;
+    .user-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--text-muted);
+      font-size: 13px;
+      font-weight: 700;
+      white-space: nowrap;
     }
 
-    .admin-nav a:hover {
-      text-decoration: underline;
-    }
-
-    /* ===== LOGOUT COMO LINK (pero por POST) ===== */
-    .logout-form {
-      margin: 0;
-    }
-
-    .logout-link {
+    /* Estilo genérico para botones del header */
+    .btn-outline {
+      border: 1px solid var(--primary);
       background: transparent;
-      border: 0;
-      padding: 0;
-      margin: 0;
-      font: inherit;
-      font-weight: bold;          /* igual a admin-nav */
-      color: #000;
+      color: var(--primary);
+      padding: 8px 12px;
+      border-radius: 10px;
+      font-weight: 800;
       cursor: pointer;
-      text-decoration: none;      /* igual a admin-nav */
+      transition: .2s;
+      font-size: 13px;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
     }
 
-    .logout-link:hover {
-      text-decoration: underline; /* igual a admin-nav:hover */
+    .btn-outline:hover {
+      background: var(--primary);
+      color: #fff;
     }
 
-    main { flex: 1; padding: 40px; }
+    .logout-form { margin: 0; }
+    
+    /* Reutilizamos el estilo btn-outline para el logout para que se vea igual */
+    .logout-btn {
+      border: 1px solid var(--primary);
+      background: transparent;
+      color: var(--primary);
+      padding: 8px 12px;
+      border-radius: 10px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: .2s;
+      font-size: 13px;
+    }
+
+    .logout-btn:hover {
+      background: var(--primary);
+      color: #fff;
+    }
+
+    /* ===== MAIN ===== */
+    main {
+      flex: 1;
+      padding: 26px 18px;
+      display: flex;
+      justify-content: center;
+    }
 
     .container {
-      background: #ffffff;
-      padding: 30px;
-      max-width: 420px;
-      margin: 0 auto;
-      border-radius: 4px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-      color: #000;
+      width: 100%;
+      max-width: 520px;
+      background: var(--bg-white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-card);
+      padding: 28px 26px;
     }
 
+    .layout-wrapper {
+      width: 100%;
+      max-width: 1200px;
+    }
+
+    /* ===== FOOTER ===== */
     footer {
-      background-color: #ffffff;
-      border-top: 2px solid #ddd;
+      background: var(--bg-white);
+      border-top: 1px solid var(--border);
       text-align: center;
-      padding: 12px 20px;
+      padding: 12px 18px;
       font-size: 12px;
-      color: #000;
-      line-height: 1.5;
-      margin-top: 10px;
+      color: #6b7a90;
+      line-height: 1.55;
     }
 
-    footer * { color: #000; }
+    /* ===== FORM BASE ===== */
+    label {
+      display: block;
+      font-weight: 800;
+      font-size: 0.9rem;
+      margin-bottom: 6px;
+    }
 
-    a { color: #000; text-decoration: none; }
-    a:hover { text-decoration: underline; }
+    input, select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #d2ddec;
+      border-radius: 10px;
+      font-size: 1rem;
+    }
 
-    @media print {
-      header, footer { display: none; }
-      main { padding: 0; }
-      .container {
-        box-shadow: none;
-        border-radius: 0;
-        max-width: 100%;
-      }
+    input:focus, select:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(44, 123, 229, 0.12);
+    }
+
+    .btn-primary {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 12px;
+      background: var(--primary);
+      color: #fff;
+      font-weight: 900;
+      cursor: pointer;
+      transition: .2s;
+      font-size: 1rem;
+    }
+
+    .btn-primary:hover {
+      background: var(--primary-dark);
     }
   </style>
+
+  {% block extra_head %}{% endblock %}
 </head>
 
 <body>
 
-  <header>
-    <div style="display:flex; align-items:center; gap:20px;">
-      <div class="logo">
-        <img src="{% static 'img/logo.png' %}" alt="Logo Parqueadero Los Cámbulos">
+<header>
+  <div class="brand">
+    <div class="logo">
+      <img src="{% static 'img/logo.png' %}" alt="Logo Parqueadero Los Cámbulos">
+    </div>
+    <div class="site-title">Parqueadero Los Cámbulos</div>
+  </div>
+
+  <div class="top-actions">
+    {% if user.is_authenticated %}
+
+      <div class="user-pill">
+        Usuario: {{ user.get_username }}
       </div>
-      <div class="site-title">Parqueadero Los Cámbulos</div>
-    </div>
 
-    <div style="display:flex; align-items:center; gap:12px;">
-      {# Solo para staff: en dashboard mostramos solo Administrador #}
-      {% if user.is_authenticated and user.is_staff %}
-        <div class="admin-nav">
-          {% if is_admin_dashboard %}
-            <a href="/admin/">Administrador</a>
-          {% endif %}
-        </div>
+      <!-- 1. BOTÓN DASHBOARD (Inicio) - SOLO ADMIN -->
+      {% if user.is_staff or user.is_superuser %}
+        {% if request.resolver_match.view_name != 'parking:admin_dashboard' %}
+          <a class="btn-outline" href="{% url 'parking:admin_dashboard' %}">
+            Dashboard
+          </a>
+        {% endif %}
       {% endif %}
 
-      {% if user.is_authenticated %}
-        <form class="logout-form" method="post" action="{% url 'logout' %}">
-          {% csrf_token %}
-          <button class="logout-link" type="submit">Cerrar sesión</button>
-        </form>
-      {% endif %}
-    </div>
-  </header>
 
-  <main>
-    <div class="container">
+      {% if user.is_staff or user.is_superuser %}
+        
+        <!-- 2. BOTÓN GESTIÓN -->
+        {% if request.resolver_match.view_name != 'parking:gestion' %}
+            <a class="btn-outline" href="{% url 'parking:gestion' %}">
+              Gestión
+            </a>
+        {% endif %}
+
+        <!-- 3. BOTÓN ADMINISTRADOR -->
+        {% if not '/admin/' in request.path %}
+          <a class="btn-outline" href="{% url 'admin:index' %}">
+            Administrador
+          </a>
+        {% endif %}
+
+      {% endif %}
+
+      <!-- LOGOUT -->
+      <form class="logout-form" method="post" action="{% url 'parking:logout' %}">
+        {% csrf_token %}
+        <button class="logout-btn" type="submit">
+          Cerrar sesión
+        </button>
+      </form>
+
+    {% endif %}
+  </div>
+</header>
+
+<main>
+  {% block layout %}
+    <div class="container {% block container_class %}{% endblock %}">
       {% block content %}{% endblock %}
     </div>
-  </main>
 
-  <footer>
-    NIT 75.081.166-3 · Vía Termales frente a ACASA, BRR La Enea<br>
-    Tel: (606) 3122775300 · Manizales – Colombia<br>
-    parqueaderoloscambulos@gmail.com<br>
-    © {% now "Y" %} Parqueadero Los Cámbulos
-  </footer>
+  {% endblock %}
+</main>
 
+<footer>
+  NIT 75.081.166-3 · Vía Termales frente a ACASA, BRR La Enea<br>
+  Tel: (606) 3122775300 · Manizales – Colombia<br>
+  parqueaderoloscambulos@gmail.com<br>
+  © {% now "Y" %} Parqueadero Los Cámbulos
+</footer>
+
+{% block extra_js %}{% endblock %}
 </body>
 </html>

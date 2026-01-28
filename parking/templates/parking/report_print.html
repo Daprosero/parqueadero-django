@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Cierre de Caja #{{ closure.id }}</title>
+    <style>
+        body {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 16px;            /* ✅ tamaño único global */
+            line-height: 1.28;
+            font-weight: 600;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+            text-rendering: geometricPrecision;
+            width: 80mm;
+            margin: 0 auto;
+            padding: 5px;
+            color: #000;
+            background: #fff;
+        }
+
+        /* 🔑 fuerza herencia total */
+        * {
+            font-size: inherit;
+        }
+
+        .no-print { margin-bottom: 15px; border-bottom: 1px solid #ccc; padding-bottom: 10px; text-align: center; }
+        button { cursor: pointer; padding: 8px 15px; font-weight: bold; border-radius: 5px; border: 1px solid #000; background:#fff; }
+
+        /* === MISMAS CLASES DEL RECIBO === */
+        .text-center { text-align: center; }
+        .text-right { text-align: right; }
+        .bold { font-weight: bold; }
+        .uppercase { text-transform: uppercase; }
+
+        .header { margin-bottom: 10px; }
+        .business-name { font-weight: bold; margin-bottom: 2px; } /* ❌ sin font-size */
+
+        .dashed-line { border-bottom: 1px dashed #000; margin: 5px 0; display: block; width: 100%; }
+
+        .row { display: flex; justify-content: space-between; margin-bottom: 2px; gap: 10px; }
+        .row span:last-child { text-align: right; }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 5px; }
+        th { text-align: left; text-transform: uppercase; padding-bottom: 3px; }
+        td { vertical-align: top; padding: 2px 0; }
+
+        @media print {
+            .no-print { display: none; }
+            body {
+                margin: 0;
+                zoom: 1;               /* evita reescalado */
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Botones -->
+    <div class="no-print">
+        <button onclick="window.print()">🖨️ IMPRIMIR</button>
+        <a href="{{ finish_url }}" style="text-decoration:none;">
+            <button type="button">✔ Finalizar</button>
+        </a>
+    </div>
+
+    <!-- Encabezado Negocio -->
+    <div class="header text-center">
+        <div class="business-name uppercase">Parqueadero Los Cambulos</div>
+        <div>Nit: 75081166-3</div>
+        <div class="uppercase">Jorge Eliecer Quiceno</div>
+        <div>Correo: parqueaderoloscambulos@gmail.com</div>
+        <div>Cel: 312 277 5300</div>
+    </div>
+
+    <div class="dashed-line"></div>
+
+    <!-- Encabezado del Reporte -->
+    <div class="text-center" style="margin-bottom: 10px;">
+        <div class="business-name uppercase">Reporte de Caja</div>
+        <div class="bold"># {{ closure.id }}</div>
+        <div>Desde: {{ closure.period_start|date:"d/m/Y h:i A" }}</div>
+        <div>Hasta: {{ closure.period_end|date:"d/m/Y h:i A" }}</div>
+    </div>
+
+    <div class="dashed-line"></div>
+
+    <!-- TABLA: encabezado -->
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 22%;">Placa</th>
+                <th style="width: 28%;" class="text-right">Parqueadero</th>
+                <th style="width: 25%;" class="text-right">Servicios</th>
+                <th style="width: 25%;" class="text-right">Pago</th>
+            </tr>
+        </thead>
+    </table>
+
+    <div class="dashed-line"></div>
+
+    <!-- TABLA: filas -->
+    <table>
+        <tbody>
+            {% for t in tickets %}
+            <tr>
+                <td style="width: 22%;">{{ t.plate }}</td>
+                <td style="width: 28%;" class="text-right">
+                    {% if t.print_parking != "0" %}${{ t.print_parking }}{% else %}-{% endif %}
+                </td>
+
+                <td style="width: 25%;" class="text-right">
+                    {% if t.print_service != "0" %}${{ t.print_service }}{% else %}-{% endif %}
+                </td>
+
+                <td style="width: 25%;" class="text-right">
+                    {% if t.print_payment_method == 'CASH' %}
+                        EFE
+                    {% elif t.print_payment_method == 'TRANSFER' %}
+                        TRF
+                    {% elif t.print_payment_method == 'CREDIT' %}
+                        CRE
+                    {% elif t.print_payment_method == 'PENDING' or t.print_payment_method == 'PENDIENTE' %}
+                        PEN
+                    {% else %}
+                        {{ t.print_payment_method|upper|slice:":3" }}
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="dashed-line"></div>
+
+    <!-- TOTALES -->
+    <div class="row">
+        <span class="bold">Total Parqueadero:</span>
+        <span class="bold">${{ total_parking }}</span>
+    </div>
+    <div class="row">
+        <span class="bold">Total Servicios:</span>
+        <span class="bold">${{ total_service }}</span>
+    </div>
+
+    <div class="dashed-line"></div>
+
+    <div class="row" style="margin-top: 5px;">
+        <span class="bold">TOTAL GENERAL:</span>
+        <span class="bold">${{ total_general }}</span>
+    </div>
+
+    <!-- ✅ NUEVO: TOTAL PENDIENTE (no afecta el total general) -->
+    {% if total_pending and total_pending != "0" %}
+    <div class="row" style="margin-top: 3px;">
+        <span class="bold">TOTAL PENDIENTE:</span>
+        <span class="bold">${{ total_pending }}</span>
+    </div>
+    {% endif %}
+
+    <div class="dashed-line"></div>
+
+    <!-- MEDIOS DE PAGO -->
+    <div class="text-center bold" style="margin-top: 6px;">--- MEDIOS DE PAGO ---</div>
+
+    <div class="row">
+        <span class="bold">Efectivo:</span>
+        <span class="bold">${{ total_cash }}</span>
+    </div>
+    <div class="row">
+        <span class="bold">Transferencia:</span>
+        <span class="bold">${{ total_transfer }}</span>
+    </div>
+    <div class="row">
+        <span class="bold">Empresas (Crédito):</span>
+        <span class="bold">${{ total_credit }}</span>
+    </div>
+
+    <!-- ✅ NUEVO: Pendientes en medios de pago -->
+    {% if total_pending and total_pending != "0" %}
+    <div class="row">
+        <span class="bold">Pendiente:</span>
+        <span class="bold">${{ total_pending }}</span>
+    </div>
+    {% endif %}
+
+    <div class="dashed-line" style="margin-top: 15px;"></div>
+
+    <!-- VEHÍCULOS ACTIVOS -->
+    <div class="row bold" style="justify-content: center; margin-top: 5px;">
+        VEHÍCULOS EN PATIO: {{ active_count }}
+    </div>
+
+    <div class="dashed-line" style="margin-bottom: 20px;"></div>
+
+    <div style="text-align:center;">.</div>
+</body>
+</html>

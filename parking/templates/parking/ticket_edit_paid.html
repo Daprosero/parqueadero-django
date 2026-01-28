@@ -1,0 +1,277 @@
+{% extends "parking/base.html" %}
+
+{% block title %}Editar servicio{% endblock %}
+
+{% block layout %}
+<style>
+  :root {
+    --primary: #2c7be5;
+    --primary-dark: #1a5bb8;
+    --bg-page: #f4f6f8;
+    --bg-white: #ffffff;
+    --border: #e3ebf6;
+    --text-main: #12263f;
+    --text-muted: #95aac9;
+    --radius: 12px;
+    --shadow-card: 0 10px 40px -10px rgba(18, 38, 63, 0.1);
+  }
+
+  .page-wrapper{
+    min-height:100%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:var(--bg-page);
+    padding:30px;
+  }
+
+  .form-card{
+    background:var(--bg-white);
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    padding:35px 40px;
+    width:100%;
+    max-width:560px;
+    box-shadow:var(--shadow-card);
+  }
+
+  .card-title{
+    font-size:1.6rem;
+    font-weight:800;
+    margin-bottom:8px;
+    color:var(--text-main);
+    text-align:center;
+  }
+
+  .card-subtitle{
+    text-align:center;
+    font-size:0.95rem;
+    color:var(--text-muted);
+    margin-bottom:18px;
+  }
+
+  .ticket-info{
+    background:#f8fbff;
+    border:1px dashed var(--primary);
+    border-radius:8px;
+    padding:14px;
+    margin: 0 0 22px 0;
+    font-size:0.92rem;
+  }
+
+  .ticket-info strong{ color:var(--primary); }
+
+  .sep{
+    height:1px;
+    background:var(--border);
+    margin:12px 0 14px 0;
+  }
+
+  form p{ margin-bottom:18px; }
+
+  label{
+    display:block;
+    font-weight:700;
+    font-size:0.9rem;
+    margin-bottom:6px;
+    color:var(--text-main);
+  }
+
+  input[type="text"], input[type="number"], select{
+    width:100%;
+    padding:10px 12px;
+    border:1px solid #d2ddec;
+    border-radius:8px;
+    font-size:1rem;
+    background:#fff;
+  }
+
+  input:focus, select:focus{
+    outline:none;
+    border-color:var(--primary);
+    box-shadow:0 0 0 3px rgba(44,123,229,.15);
+  }
+
+  .hint{
+    display:block;
+    margin-top:6px;
+    color:var(--text-muted);
+    font-size:0.88rem;
+  }
+
+  .error-box{
+    border:1px solid #f5c2c7;
+    background:#f8d7da;
+    color:#842029;
+    border-radius:10px;
+    padding:12px 14px;
+    margin-bottom:16px;
+    font-size:0.95rem;
+    font-weight:700;
+  }
+
+  .field-error{
+    display:block;
+    margin-top:8px;
+    color:#dc3545;
+    font-weight:700;
+    font-size:0.9rem;
+  }
+
+  .form-actions{
+    display:flex;
+    gap:12px;
+    margin-top:25px;
+  }
+
+  .btn-primary{
+    flex:1;
+    padding:12px;
+    border:none;
+    border-radius:10px;
+    background:var(--primary);
+    color:white;
+    font-size:1rem;
+    font-weight:700;
+    cursor:pointer;
+  }
+
+  .btn-primary:hover{ background:var(--primary-dark); }
+
+  .btn-secondary{
+    flex:1;
+    padding:12px;
+    border-radius:10px;
+    background:#f1f4f8;
+    border:1px solid var(--border);
+    font-weight:700;
+    text-align:center;
+    text-decoration:none;
+    color:var(--text-main);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }
+
+  .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+</style>
+
+<div class="page-wrapper">
+  <div class="form-card">
+
+    <div class="card-title">Editar servicio</div>
+    <div class="card-subtitle">
+      Modifica el tipo de servicio y su valor para este ticket.
+    </div>
+
+    <div class="ticket-info">
+      <div><strong>Placa:</strong> {{ ticket.plate }}</div>
+      <div><strong>Vehículo:</strong> {{ ticket.vehicle_type.name }}</div>
+      <div><strong>Cliente:</strong> {{ ticket.get_client_kind_display }}</div>
+
+      <div>
+        <strong>Estado:</strong>
+        {% if ticket.status == "PENDING" %}PENDIENTE{% else %}PAGADO{% endif %}
+      </div>
+
+      <div><strong>Salida:</strong> {% if ticket.check_out %}{{ ticket.check_out|date:"d/m/Y h:i a" }}{% else %}—{% endif %}</div>
+
+      <div class="sep"></div>
+
+      <div>
+        <strong>Parqueadero (solo):</strong>
+        {{ ticket.parking_amount_cop|default:0 }} COP
+      </div>
+
+      <div style="margin-top:6px;">
+        <strong>Servicio actual:</strong>
+        <span class="mono">
+          {% if ticket.work_type and ticket.work_type != "NONE" %}
+            {{ ticket.get_work_type_display }}
+          {% else %}
+            —
+          {% endif %}
+        </span>
+        &nbsp;|&nbsp;
+        <strong>Valor actual:</strong> {{ ticket.work_amount_cop|default:0 }} COP
+      </div>
+
+      <div style="margin-top:6px;">
+        <strong>Total:</strong> {{ ticket.total_amount_cop|default:0 }} COP
+      </div>
+    </div>
+
+    {% if form.non_field_errors %}
+      <div class="error-box">{{ form.non_field_errors }}</div>
+    {% endif %}
+
+    <form method="post" id="editServiceForm" action="">
+      {% csrf_token %}
+
+      {# ✅ next_url viene desde la vista; se conserva en POST #}
+      <input type="hidden" name="next" value="{{ next_url|default:'/' }}">
+
+      <p>
+        {{ form.service_type.label_tag }}
+        {{ form.service_type }}
+        <small id="serviceTypeHint" class="hint">
+          Selecciona el tipo de servicio. Si eliges <strong>Ninguno</strong>, el valor se fija automáticamente en 0.
+        </small>
+
+        {% if form.service_type.errors %}
+          <span class="field-error">{{ form.service_type.errors }}</span>
+        {% endif %}
+      </p>
+
+      <p>
+        {{ form.service_amount_cop.label_tag }}
+        {{ form.service_amount_cop }}
+        <small id="serviceAmountHint" class="hint">
+          Si seleccionas un servicio, el valor debe ser mayor a 0.
+        </small>
+
+        {% if form.service_amount_cop.errors %}
+          <span class="field-error">{{ form.service_amount_cop.errors }}</span>
+        {% endif %}
+      </p>
+
+      <div class="form-actions">
+        <button type="submit" class="btn-primary">Guardar cambios</button>
+
+        <a href="{{ next_url|default:'/' }}" class="btn-secondary">
+          Volver
+        </a>
+      </div>
+    </form>
+
+  </div>
+</div>
+
+<script>
+  (function(){
+    const form = document.getElementById("editServiceForm");
+    if (!form) return;
+
+    const st = document.getElementById("id_service_type");
+    const amt = document.getElementById("id_service_amount_cop");
+    const hintAmt = document.getElementById("serviceAmountHint");
+
+    function applyServiceUI(){
+      if (!st || !amt) return;
+      const v = (st.value || "").trim().toUpperCase();
+
+      if (v === "NONE") {
+        amt.value = "0";
+        amt.disabled = true;
+        if (hintAmt) hintAmt.textContent = "Elegiste 'Ninguno': el valor se fija en 0.";
+      } else {
+        amt.disabled = false;
+        if (hintAmt) hintAmt.textContent = "Si seleccionas un servicio, el valor debe ser mayor a 0.";
+      }
+    }
+
+    if (st) st.addEventListener("change", applyServiceUI);
+    applyServiceUI();
+  })();
+</script>
+{% endblock %}
