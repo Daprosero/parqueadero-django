@@ -206,10 +206,43 @@
   .mono{
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
+    /* ✅ Volver (mismo estilo del Dashboard) */
+  .back-to-menu{
+    display:inline-flex;
+    width:fit-content;
+    align-self:flex-start;
+
+    align-items:center;
+    gap:0.5rem;
+    font-weight:900;
+    font-size:0.9rem;
+    color:var(--d-muted);
+    text-decoration:none;
+
+    padding:0.25rem 0.4rem;
+    border-radius:8px;
+    border:1px solid transparent;
+    transition:0.2s;
+  }
+  .back-to-menu:hover{
+    color:var(--d-dark);
+    background:#f9fafb;
+    border-color:var(--d-border);
+    transform:translateY(-1px);
+  }
+  .back-to-menu .arrow{
+    font-size:1.05rem;
+    line-height:1;
+  }
+
 </style>
 
 <div class="dash-scope">
   <div class="dashboard-sheet">
+    <a class="back-to-menu" href="{% url 'parking:gestion' %}">
+      <span class="arrow">←</span>
+      <span>Volver</span>
+    </a>
 
     <div class="header-row">
       <div class="header-title">
