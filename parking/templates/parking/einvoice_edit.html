@@ -1,0 +1,163 @@
+{% extends "parking/base.html" %}
+
+{% block title %}Editar factura pendiente{% endblock %}
+
+{% block content %}
+<style>
+  html, body { background-color:#f3f4f6 !important; }
+
+  .sheet{
+    max-width: 980px;
+    margin: 0 auto;
+    background:#fff;
+    border:1px solid #e5e7eb;
+    border-radius:12px;
+    box-shadow:0 1px 3px rgba(0,0,0,.10),0 1px 2px rgba(0,0,0,.06);
+    padding: 18px 20px;
+  }
+
+  .topbar{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:12px;
+    flex-wrap:wrap;
+    border-bottom:1px solid #e5e7eb;
+    padding-bottom:12px;
+    margin-bottom:14px;
+  }
+
+  .title h2{
+    margin:0;
+    font-size:1.25rem;
+    font-weight:900;
+    color:#111827;
+  }
+
+  .title p{
+    margin:4px 0 0;
+    color:#6b7280;
+    font-size:.92rem;
+  }
+
+  .btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    height:36px;
+    padding:0 14px;
+    border-radius:999px;
+    font-weight:800;
+    border:1px solid #e5e7eb;
+    background:#fff;
+    color:#111827;
+    text-decoration:none;
+    transition:.15s;
+    white-space:nowrap;
+  }
+  .btn:hover{ background:#f9fafb; transform:translateY(-1px); }
+
+  .btn-primary{
+    border-color:#2563eb;
+    color:#2563eb;
+  }
+
+  .grid{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  @media (max-width: 860px){
+    .grid{ grid-template-columns: 1fr; }
+  }
+
+  .field label{
+    display:block;
+    font-weight:900;
+    margin-bottom:6px;
+    color:#111827;
+    font-size:.92rem;
+  }
+
+  .field input, .field select, .field textarea{
+    width:100%;
+    border:1px solid #e5e7eb;
+    border-radius:10px;
+    padding:10px 12px;
+    font-size:.95rem;
+    background:#fff;
+    outline:none;
+  }
+
+  .field textarea{ min-height: 110px; }
+
+  .errors{
+    margin: 10px 0 0;
+    padding: 10px 12px;
+    background:#fff0f0;
+    border:1px solid #ffd9d9;
+    border-radius:10px;
+    color:#7f1d1d;
+    font-size:.9rem;
+  }
+
+  .actions{
+    display:flex;
+    gap:10px;
+    justify-content:flex-end;
+    margin-top:14px;
+    flex-wrap:wrap;
+  }
+</style>
+
+<div class="sheet">
+  <div class="topbar">
+    <div class="title">
+      <h2>Editar factura pendiente</h2>
+      <p>{{ inv.full_name }} — {{ inv.id_number }}</p>
+    </div>
+
+    <a class="btn" href="{{ next|default:'{% url "parking:einvoices_outbox" %}' }}">← Volver</a>
+  </div>
+
+  <form method="post">
+    {% csrf_token %}
+
+    {% if form.non_field_errors %}
+      <div class="errors">{{ form.non_field_errors }}</div>
+    {% endif %}
+
+    <div class="grid">
+      <div class="field">
+        <label>Identificación</label>
+        {{ form.id_number }}
+        {% if form.id_number.errors %}<div class="errors">{{ form.id_number.errors }}</div>{% endif %}
+      </div>
+
+      <div class="field">
+        <label>Cliente</label>
+        {{ form.full_name }}
+        {% if form.full_name.errors %}<div class="errors">{{ form.full_name.errors }}</div>{% endif %}
+      </div>
+
+      <div class="field">
+        <label>Correo</label>
+        {{ form.email }}
+        {% if form.email.errors %}<div class="errors">{{ form.email.errors }}</div>{% endif %}
+      </div>
+
+      <div class="field">
+        <label>Total (COP)</label>
+        {{ form.total_amount_cop }}
+        {% if form.total_amount_cop.errors %}<div class="errors">{{ form.total_amount_cop.errors }}</div>{% endif %}
+      </div>
+    </div>
+
+    {# Si tu form tiene last_error u otros campos y quieres editarlos, agrégalos aquí #}
+
+    <div class="actions">
+      <button type="submit" class="btn btn-primary">💾 Guardar</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

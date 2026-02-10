@@ -229,14 +229,7 @@
         Usuario: {{ user.get_username }}
       </div>
 
-      <!-- 1. BOTÓN DASHBOARD (Inicio) - SOLO ADMIN -->
-      {% if user.is_staff or user.is_superuser %}
-        {% if request.resolver_match.view_name != 'parking:admin_dashboard' %}
-          <a class="btn-outline" href="{% url 'parking:admin_dashboard' %}">
-            Dashboard
-          </a>
-        {% endif %}
-      {% endif %}
+      
 
 
       {% if user.is_staff or user.is_superuser %}

@@ -1,8 +1,97 @@
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.utils.html import format_html
 from django.urls import reverse
-
 from .models import VehicleType, RatePlan, Ticket, Payment, Customer, Closure,MonthlyPlate
+from django.utils import timezone
+from .models import ElectronicInvoiceOutbox
+from .utils import emit_electronic_invoice_preview  # 👈 tu función real
+from django.db import IntegrityError
+def try_send_electronic_invoice(obj: ElectronicInvoiceOutbox) -> None:
+    """
+    Envía usando Siigo con el payload del outbox.
+    Si OK: no retorna nada.
+    Si falla: lanza Exception con mensaje amigable.
+    """
+    emit_electronic_invoice_preview(
+        id_number=obj.id_number,
+        full_name=obj.full_name,
+        email=obj.email,
+        total_amount_cop=obj.total_amount_cop,
+    )
+
+
+@admin.register(ElectronicInvoiceOutbox)
+class ElectronicInvoiceOutboxAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "status",
+        "id_number",
+        "full_name",
+        "email",
+        "total_amount_cop",
+        "last_attempt_at",
+        "created_at",
+    )
+    list_filter = ("status", "created_at", "last_attempt_at")
+    search_fields = ("id_number", "full_name", "email")
+    ordering = ("-created_at",)
+
+    readonly_fields = ("created_at", "updated_at", "last_attempt_at")
+
+    fieldsets = (
+        ("Estado", {"fields": ("status", "last_error", "last_attempt_at")}),
+        ("Datos de factura (payload)", {"fields": ("id_number", "full_name", "email", "total_amount_cop")}),
+        ("Timestamps", {"fields": ("created_at", "updated_at")}),
+    )
+
+    actions = ("retry_send", "clear_error")
+
+    @admin.action(description="Reintentar envío (si sale OK se elimina)")
+    def retry_send(self, request, queryset):
+        ok = 0
+        fail = 0
+
+        qs = queryset.filter(status="PENDING")
+
+        for obj in qs:
+            # marca intento (aunque falle o no)
+            obj.last_attempt_at = timezone.now()
+            obj.save(update_fields=["last_attempt_at", "updated_at"])
+
+            try:
+                # 1) Intento real (Siigo)
+                try_send_electronic_invoice(obj)
+
+                # 2) OK => eliminar (regla del outbox)
+                obj.delete()
+                ok += 1
+
+            except IntegrityError:
+                # caso raro por unique_together (concurrencia). No debería pasar en reintento.
+                obj.last_error = "Conflicto de duplicado (unique_together). Recarga y revisa registros."
+                obj.status = "PENDING"
+                obj.save(update_fields=["last_error", "status", "updated_at"])
+                fail += 1
+
+            except Exception as e:
+                # Error => queda PENDING y registramos mensaje
+                obj.last_error = str(e).strip() or "Error desconocido"
+                obj.status = "PENDING"
+                obj.save(update_fields=["last_error", "status", "updated_at"])
+                fail += 1
+
+        if ok:
+            messages.success(request, f"Envío OK: {ok} registro(s) enviados y eliminados.")
+        if fail:
+            messages.error(request, f"Fallaron: {fail} registro(s). Revisa el campo 'Último error'.")
+        if not ok and not fail:
+            messages.info(request, "No había registros PENDING seleccionados para reintentar.")
+
+    @admin.action(description="Limpiar error (mantener PENDING)")
+    def clear_error(self, request, queryset):
+        updated = queryset.update(last_error="", status="PENDING")
+        messages.success(request, f"Se limpió el error en {updated} registro(s).")
+
 
 
 @admin.register(VehicleType)

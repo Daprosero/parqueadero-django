@@ -7,15 +7,34 @@ from django.urls import reverse
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.db import transaction
-
 from .models import (
     Ticket,
     VehicleType,
     Customer,
     RatePlan,
     MonthlyPlate,
+    ElectronicInvoiceOutbox
 )
 # forms.py
+
+class EInvoiceOutboxForm(forms.ModelForm):
+    class Meta:
+        model = ElectronicInvoiceOutbox
+        fields = [
+            "id_number",
+            "full_name",
+            "email",
+            "total_amount_cop",
+            # agrega/quita según tu modelo
+            # "notes", "address", "phone", etc...
+        ]
+        widgets = {
+            "full_name": forms.TextInput(attrs={"class": "form-control"}),
+            "email": forms.EmailInput(attrs={"class": "form-control"}),
+            "id_number": forms.TextInput(attrs={"class": "form-control"}),
+            "total_amount_cop": forms.NumberInput(attrs={"class": "form-control"}),
+        }
+
 class MonthlyChargeForm(forms.Form):
     METHOD_CHOICES = [
         ("", "— Selecciona una opción —"),

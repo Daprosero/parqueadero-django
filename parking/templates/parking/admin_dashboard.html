@@ -1,8 +1,548 @@
 {% extends "parking/base.html" %}
-
-{% block title %}Dashboard Administrador{% endblock %}
+{% block title %}Dashboard Gerencial{% endblock %}
 
 {% block content %}
-  <h2 style="margin-top:0;">Dashboard</h2>
-  <p class="muted">No hay información para mostrar aún.</p>
+
+<style>
+  /* ✅ Fondo global SOLO en esta vista */
+  html, body { background-color: #f3f4f6 !important; }
+  /* ✅ Volver (flecha + texto) */
+  .back-to-menu{
+    display:inline-flex;
+    align-items:center;
+    gap:0.5rem;
+    font-weight:900;
+    font-size:0.9rem;
+    color:var(--d-muted);
+    text-decoration:none;
+    padding:0.35rem 0.6rem;
+    border-radius:10px;
+    border:1px solid transparent;
+    transition:0.2s;
+  }
+  .back-to-menu:hover{
+    color:var(--d-dark);
+    background:#f9fafb;
+    border-color:var(--d-border);
+    transform:translateY(-1px);
+  }
+  .back-to-menu .arrow{
+    font-size:1.05rem;
+    line-height:1;
+  }
+
+  /* ============================================================
+     ✅ FIX GAP INFERIOR DEL BASE (NO toca el footer)
+  ============================================================ */
+  body:has(.dash-scope) main,
+  body:has(.dash-scope) .container,
+  body:has(.dash-scope) .container-fluid,
+  body:has(.dash-scope) .content,
+  body:has(.dash-scope) .content-wrapper,
+  body:has(.dash-scope) .page-content {
+      padding-bottom: 0 !important;
+      margin-bottom: 0 !important;
+  }
+  body:has(.dash-scope) main > :last-child { margin-bottom: 0 !important; }
+
+  /* --- ESTILOS SCOPED --- */
+  .dash-scope{
+      --d-bg:#f3f4f6;
+      --d-sheet:#ffffff;
+      --d-text:#111827;
+      --d-muted:#6b7280;
+      --d-border:#e5e7eb;
+      --d-teal:#00bfa5;
+      --d-dark:#1f2937;
+      --d-radius:12px;
+      --d-shadow:0 1px 3px 0 rgba(0,0,0,0.10),0 1px 2px 0 rgba(0,0,0,0.06);
+
+      background:var(--d-bg);
+      font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+      box-sizing:border-box;
+
+      /* ✅ breakout horizontal (dashboard a pantalla casi completa) */
+      position:relative;
+      left:50%;
+      transform:translateX(-50%);
+      width:100vw;
+      overflow-x:clip;
+
+      /* corrección GAP SUPERIOR */
+      margin-top:-62px;
+      padding-top:calc(1rem + 4px);
+
+      padding-left:1rem;
+      padding-right:1rem;
+      padding-bottom:1rem;
+  }
+
+  /* HOJA PRINCIPAL (más ancha) */
+  .dashboard-sheet{
+      background:var(--d-sheet);
+      border-radius:var(--d-radius);
+      box-shadow:var(--d-shadow);
+      padding:1.5rem 2rem;
+
+      width:100%;
+      max-width:1920px; /* ✅ más ancho */
+      margin:0 auto;
+
+      box-sizing:border-box;
+      display:flex;
+      flex-direction:column;
+      gap:1.75rem;
+
+      overflow-x:hidden;
+  }
+
+  /* HEADER */
+  .header-row{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      border-bottom:1px solid var(--d-border);
+      padding-bottom:1.25rem;
+      flex-wrap:wrap;
+      gap:1.0rem;
+      width:100%;
+      min-width:0;
+  }
+  .header-title{ min-width:0; }
+  .header-title h2{
+      margin:0;
+      font-size:1.6rem;
+      font-weight:800;
+      color:var(--d-dark);
+      letter-spacing:-0.02em;
+  }
+  .header-title p{ margin:0.25rem 0 0; color:var(--d-muted); font-size:0.9rem; }
+
+  /* FILTROS */
+  .filter-form{
+      display:flex;
+      gap:0.75rem;
+      align-items:flex-end;
+      flex-wrap:wrap;
+      min-width:0;
+  }
+  .input-group{ display:flex; flex-direction:column; gap:0.35rem; }
+  .input-group label{
+      font-size:0.7rem;
+      font-weight:700;
+      color:var(--d-muted);
+      text-transform:uppercase;
+      letter-spacing:0.05em;
+  }
+  .form-control-dash{
+      border:1px solid var(--d-border);
+      border-radius:8px;
+      padding:0.5rem 0.75rem;
+      font-size:0.9rem;
+      color:var(--d-dark);
+      background:#f9fafb;
+      min-width:150px;
+  }
+  .btn-dash-update{
+      background:var(--d-dark);
+      color:#fff;
+      border:none;
+      padding:0 1.25rem;
+      border-radius:8px;
+      font-weight:700;
+      cursor:pointer;
+      height:38px;
+      transition:background 0.2s;
+  }
+  .btn-dash-update:hover{ background:#111827; }
+
+  .form-control-dash,
+  .filter-form select,
+  .filter-form input[type="date"],
+  .btn-dash-update{
+      height:38px;
+      line-height:38px;
+  }
+  .filter-form select{ padding-top:0; padding-bottom:0; }
+  .input-group{ justify-content:flex-end; }
+
+  /* KPIs */
+  .kpi-row{
+      display:grid;
+      grid-template-columns:repeat(5, minmax(0, 1fr));
+      gap:1.25rem;
+      width:100%;
+  }
+  .kpi-card{
+      background:#fff;
+      border:1px solid var(--d-border);
+      border-radius:12px;
+      padding:1.25rem 1.25rem 1.15rem 1.25rem;
+      position:relative;
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
+      min-width:0;
+      overflow:hidden;
+  }
+  .kpi-card::before{
+      content:"";
+      position:absolute;
+      left:0; top:0; bottom:0;
+      width:4px;
+      background:var(--d-teal);
+      border-radius:12px 0 0 12px;
+  }
+  .kpi-card.warning::before{ background:#f59e0b; }
+  .kpi-card.money::before{ background:var(--d-dark); }
+  .kpi-card.info::before{ background:#3b82f6; }
+  .kpi-card.purple::before{ background:#6366f1; }
+
+  .kpi-label{
+      font-size:0.72rem;
+      font-weight:800;
+      color:var(--d-muted);
+      text-transform:uppercase;
+      margin-bottom:0.35rem;
+      letter-spacing:0.06em;
+  }
+  .kpi-value{
+      font-size:2.15rem;
+      font-weight:900;
+      color:var(--d-dark);
+      line-height:1;
+      margin-bottom:0.15rem;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+  }
+  .kpi-sub{ font-size:0.8rem; color:var(--d-muted); }
+
+  /* GRÁFICOS */
+  .charts-row-top{
+      display:grid;
+      grid-template-columns:minmax(0, 2fr) minmax(0, 1fr);
+      gap:1.25rem;
+      width:100%;
+  }
+  .chart-box{
+      border:1px solid var(--d-border);
+      border-radius:12px;
+      padding:1.25rem;
+      background:#fff;
+      min-width:0;
+      overflow:hidden;
+  }
+  .chart-header{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom:0.75rem;
+      min-width:0;
+      gap:1rem;
+  }
+  .chart-title{ font-size:1.05rem; font-weight:800; color:var(--d-dark); }
+  #chartDaily, #chartMethod{ width:100%; }
+
+  /* RESPONSIVE */
+  @media (max-width: 1400px){
+      .kpi-row{ grid-template-columns:repeat(3, minmax(0, 1fr)); }
+  }
+  @media (max-width: 900px){
+      .charts-row-top{ grid-template-columns:1fr; }
+      .kpi-row{ grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 600px){
+      .dash-scope{
+          padding-left:0.5rem;
+          padding-right:0.5rem;
+          padding-bottom:0.75rem;
+          margin-top:-20px;
+          padding-top:calc(0.5rem + 20px);
+      }
+      .dashboard-sheet{ padding:1rem; }
+      .header-row{ flex-direction:column; align-items:stretch; }
+      .filter-form{ flex-direction:column; width:100%; }
+      .input-group{ width:100%; }
+      .btn-dash-update{ width:100%; margin-top:0.25rem; }
+      .kpi-row{ grid-template-columns:1fr; }
+  }
+  .back-to-menu{
+  display:inline-flex;
+  width:fit-content;
+  align-self:flex-start;
+
+  align-items:center;
+  gap:0.5rem;
+  font-weight:900;
+  font-size:0.9rem;
+  color:var(--d-muted);
+  text-decoration:none;
+  padding:0.25rem 0.4rem;   /* padding mínimo */
+  border-radius:8px;
+  border:1px solid transparent;
+  transition:0.2s;
+}
+
+
+</style>
+
+<div class="dash-scope">
+  <div class="dashboard-sheet">
+    <a class="back-to-menu" href="{% url 'parking:gestion' %}">
+      <span>← Volver</span>
+    </a>
+
+
+    <!-- HEADER -->
+    <div class="header-row">
+      <div class="header-title">
+        <h2>Panel de Control</h2>
+        <p>Resumen operativo y financiero</p>
+      </div>
+
+      <form id="rangeForm" class="filter-form">
+        <div class="input-group">
+          <label>Desde</label>
+          <input type="date" id="startDate" name="start" class="form-control-dash">
+        </div>
+        <div class="input-group">
+          <label>Hasta</label>
+          <input type="date" id="endDate" name="end" class="form-control-dash">
+        </div>
+
+        <div class="input-group">
+          <label>Tipo vehículo</label>
+          <select id="vehicleType" name="vehicle_type" class="form-control-dash">
+            <option value="ALL">Todos</option>
+            {% if vehicle_types %}
+              {% for vt in vehicle_types %}
+                <option value="{{ vt.id }}">{{ vt.name }}</option>
+              {% endfor %}
+            {% endif %}
+          </select>
+        </div>
+
+        <div class="input-group">
+          <button type="submit" class="btn-dash-update">Filtrar</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- KPIs (cards) -->
+    <div class="kpi-row">
+      <div class="kpi-card">
+        <div class="kpi-label">Vehículos en Patio</div>
+        <div class="kpi-value" id="kpiActive">-</div>
+        <div class="kpi-sub">Actualmente</div>
+      </div>
+
+      <div class="kpi-card warning">
+        <div class="kpi-label">Pendientes Pago</div>
+        <div class="kpi-value" id="kpiPending">-</div>
+        <div class="kpi-sub">Créditos / Empresas</div>
+      </div>
+
+      <div class="kpi-card money">
+        <div class="kpi-label">Ingresos Totales</div>
+        <div class="kpi-value" id="kpiRevenue">$0</div>
+        <div class="kpi-sub">Periodo seleccionado</div>
+      </div>
+
+      <div class="kpi-card info">
+        <div class="kpi-label">Tickets Pagados</div>
+        <div class="kpi-value" id="kpiPaidCount">0</div>
+        <div class="kpi-sub">En el periodo</div>
+      </div>
+
+      <div class="kpi-card purple">
+        <div class="kpi-label">Clientes Mensuales</div>
+        <div class="kpi-value" id="kpiMonthlyClients">0</div>
+        <div class="kpi-sub">Placas registradas</div>
+      </div>
+    </div>
+
+    <!-- GRÁFICOS (interactivos) -->
+    <div class="charts-row-top">
+      <div class="chart-box">
+        <div class="chart-header">
+          <span class="chart-title">Tendencia de Ingresos (Total vs Servicio)</span>
+        </div>
+        <div id="chartDaily"></div>
+      </div>
+
+      <div class="chart-box">
+        <div class="chart-header">
+          <span class="chart-title">Métodos de Pago</span>
+        </div>
+        <div id="chartMethod"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+<script>
+  const DATA_URL = "{% url 'parking:admin_dashboard_data' %}";
+
+  const fmtCOP = (n) => new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    maximumFractionDigits: 0
+  }).format(Number(n || 0));
+
+  const COLORS = {
+    // ✅ en ApexCharts se asigna por orden de series/labels
+    palette: ['#00bfa5', '#6366f1', '#1f2937', '#f59e0b', '#ef4444', '#3b82f6']
+  };
+
+  /* ✅ Traducción/normalización de opciones del parqueadero */
+  const PAYMENT_LABELS_ES = {
+    CASH: "Efectivo",
+    TRANSFER: "Transferencia",
+    CARD: "Tarjeta",
+    QR: "QR",
+    ASSIGNED: "Crédito",
+    CREDIT: "Crédito",
+    PENDING: "Pendiente",
+    EFECTIVO: "Efectivo",
+    TRANSFERENCIA: "Transferencia",
+    TARJETA: "Tarjeta",
+    CREDITO: "Crédito",
+    PENDIENTE: "Pendiente",
+  };
+
+  function mapParkingLabelEs(label) {
+    const key = String(label || "")
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g, "_");
+    return PAYMENT_LABELS_ES[key] || label;
+  }
+
+  let chartDaily, chartMethod;
+
+  function initCharts() {
+    chartDaily = new ApexCharts(document.querySelector("#chartDaily"), {
+      chart: {
+        type: 'area',
+        height: 320,
+        fontFamily: 'inherit',
+        toolbar: { show: true, tools: { download: true, selection: true, zoom: true, zoomin: true, zoomout: true, pan: true, reset: true } }
+      },
+      colors: COLORS.palette,
+      fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.45, opacityTo: 0.06, stops: [0, 90, 100] } },
+      dataLabels: { enabled: false },
+      stroke: { curve: 'smooth', width: 2 },
+      series: [],
+      xaxis: {
+        categories: [],
+        axisBorder: { show: false },
+        axisTicks: { show: false },
+        labels: { rotate: -45 }
+      },
+      yaxis: { labels: { formatter: (val) => fmtCOP(val) } },
+      tooltip: { y: { formatter: (val) => fmtCOP(val) } },
+      grid: { borderColor: '#f3f4f6' },
+      legend: { show: true, position: 'top', horizontalAlign: 'left' }
+    });
+    chartDaily.render();
+
+    chartMethod = new ApexCharts(document.querySelector("#chartMethod"), {
+      chart: { type: 'donut', height: 320, fontFamily: 'inherit' },
+      colors: COLORS.palette,
+      labels: [],
+      series: [],
+      legend: { position: 'bottom' },
+      plotOptions: { pie: { donut: { size: '65%' } } },
+      dataLabels: {
+        formatter: function (val) { return (val || 0).toFixed(1) + "%"; }
+      },
+      tooltip: { y: { formatter: (val) => fmtCOP(val) } },
+      stroke: { show: false }
+    });
+    chartMethod.render();
+  }
+
+  async function loadData(start, end, vehicleType) {
+    const qs = new URLSearchParams();
+    if (start) qs.set("start", start);
+    if (end) qs.set("end", end);
+    if (vehicleType) qs.set("vehicle_type", vehicleType);
+
+    try {
+      const res = await fetch(DATA_URL + "?" + qs.toString(), {
+        headers: { "X-Requested-With": "XMLHttpRequest" }
+      });
+      if (!res.ok) throw new Error("Error HTTP " + res.status);
+      const payload = await res.json();
+      applyData(payload);
+    } catch (e) {
+      console.error("Dashboard load error:", e);
+    }
+  }
+
+  function applyData(payload) {
+    // filtros
+    document.querySelector("#startDate").value = payload.filters.start;
+    document.querySelector("#endDate").value = payload.filters.end;
+    const vt = document.querySelector("#vehicleType");
+    if (vt && payload.filters.vehicle_type) vt.value = payload.filters.vehicle_type;
+
+    // KPIs
+    document.querySelector("#kpiActive").textContent = payload.kpis.active_now;
+    document.querySelector("#kpiPending").textContent = payload.kpis.pending_now;
+    document.querySelector("#kpiRevenue").textContent = fmtCOP(payload.kpis.revenue_range);
+    document.querySelector("#kpiPaidCount").textContent = payload.kpis.payments_paid_count;
+    const km = document.querySelector("#kpiMonthlyClients");
+    if (km) km.textContent = payload.kpis.monthly_clients_count ?? 0;
+
+    // Daily chart (Total vs Servicio) ✅
+    chartDaily.updateOptions({
+      xaxis: { categories: payload.charts.daily_revenue.labels || [] }
+    });
+    chartDaily.updateSeries(payload.charts.daily_revenue.series || []);
+
+    // Donut payment method
+    const rawLabels = payload.charts.payment_method_amount.labels || [];
+    const labelsEs = rawLabels.map(mapParkingLabelEs);
+    chartMethod.updateOptions({ labels: labelsEs });
+    chartMethod.updateSeries(payload.charts.payment_method_amount.series || []);
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    initCharts();
+
+    // ✅ carga inicial
+    loadData(
+      document.querySelector("#startDate").value,
+      document.querySelector("#endDate").value,
+      document.querySelector("#vehicleType")?.value || "ALL"
+    );
+
+    // ✅ filtrar por botón
+    document.querySelector("#rangeForm").addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      loadData(
+        document.querySelector("#startDate").value,
+        document.querySelector("#endDate").value,
+        document.querySelector("#vehicleType")?.value || "ALL"
+      );
+    });
+
+    // ✅ al cambiar tipo, refresca todo
+    const vtSel = document.querySelector("#vehicleType");
+    if (vtSel) {
+      vtSel.addEventListener("change", () => {
+        loadData(
+          document.querySelector("#startDate").value,
+          document.querySelector("#endDate").value,
+          vtSel.value || "ALL"
+        );
+      });
+    }
+  });
+</script>
+
 {% endblock %}

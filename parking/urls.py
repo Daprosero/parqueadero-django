@@ -29,6 +29,7 @@ urlpatterns = [
     path("ticket/<int:ticket_id>/edit-paid/", views.ticket_edit_paid, name="ticket_edit_paid"),
 
     path("admin-dashboard/", views.admin_dashboard, name="admin_dashboard"),
+    path('dashboard/data/', views.admin_dashboard_data, name='admin_dashboard_data'),
 
     path("closure/generate/", views.generate_closure, name="generate_closure"),
 
@@ -52,7 +53,13 @@ urlpatterns = [
     path("gestion/monthly/delete/<int:pk>/", views.monthly_delete, name="monthly_delete"),
     path("gestion/monthly/charge/<int:pk>/", views.monthly_charge, name="monthly_charge"),
     path("gestion/monthly/receipt/", views.monthly_receipt, name="monthly_receipt"),
+    path("einvoices/outbox/", views.einvoices_outbox, name="einvoices_outbox"),
 
+    path("einvoices/outbox/<int:pk>/edit/", views.einvoice_edit, name="einvoice_edit"),
+    path("einvoices/outbox/<int:pk>/delete/", views.einvoice_delete, name="einvoice_delete"),
+    path("einvoices/outbox/<int:pk>/retry/", views.einvoice_retry, name="einvoice_retry"),
+
+    path("einvoices/outbox/retry-all/", views.einvoices_retry_all, name="einvoices_retry_all"),
     # ===== REPORTES =====
     path("reports/active-vehicles/", views.active_vehicles_report, name="active_vehicles_report"),
 ]

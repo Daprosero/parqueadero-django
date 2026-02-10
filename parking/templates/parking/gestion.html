@@ -39,7 +39,7 @@
   .back-link:hover { color: var(--primary); }
 
   /* ✅ GRILLA DEL MENÚ (AHORA 4x2) */
-  .menu-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; }
+  .menu-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; }
   @media (max-width: 980px){
     .menu-grid { grid-template-columns: repeat(2, 1fr); }
   }
@@ -480,6 +480,19 @@
           <span class="title-card">Cierres de caja</span>
           <span class="desc-card">Buscar / editar / reimprimir</span>
       </a>
+      {# DASHBOARD #}
+      <a href="{% url 'parking:admin_dashboard' %}" class="menu-card">
+          <span class="icon-big">📊</span>
+          <span class="title-card">Dashboard</span>
+          <span class="desc-card">Visualizar / Datos</span>
+      </a>
+      {# SIGGO #}
+     <a href="{% url 'parking:einvoices_outbox' %}" class="menu-card">
+        <span class="icon-big">🧾</span>
+        <span class="title-card">SIIGO</span>
+        <span class="desc-card">Editar / Enviar</span>
+    </a>
+
   </div>
 {% endif %}
 <!-- ========================= -->

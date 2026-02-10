@@ -1,11 +1,6 @@
-# views.py (ajustado para usar utils.py con lógica por tramos 06-18 / 18-06)
-# - Helpers locales eliminados (fmt, client label, etc.)
-# - Cotización (quote) y Inspect usan estimate_amount_cop()
-# - Cierre de ACTIVE usa estimate_amount_cop() para congelar total_amount_cop con la nueva lógica
-# - ticket_edit_paid recalcula total con estimate_amount_cop() (con check_out si existe)
 
 from urllib.parse import quote
-
+from django import views
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.decorators import login_required
@@ -21,6 +16,13 @@ import math
 from django.db import transaction
 import json
 import re
+from django.core.validators import validate_email
+from django.core.exceptions import ValidationError
+from django.db.models import Sum, Count
+from django.conf import settings
+from datetime import timedelta
+import traceback
+from django.db.models.functions import TruncDate
 
 from .forms import (
     ClosePaymentForm,
@@ -35,6 +37,7 @@ from .forms import (
     TicketCreateForm,
     VehicleTypeForm,
     MonthlyPlateForm,
+    EInvoiceOutboxForm,
 )
 
 from .models import (
@@ -45,10 +48,9 @@ from .models import (
     Ticket,
     VehicleType,
     iter_pricing_segments,
-    MonthlyPlate
+    MonthlyPlate,
+    ElectronicInvoiceOutbox,
 )
-
-
 from .utils import (
     fmt_cop,
     client_label,
@@ -70,9 +72,8 @@ def home(request):
 def post_login_redirect(request):
     user = request.user
     if user.is_staff or user.is_superuser:
-        return redirect("/admin/")
-    return redirect("parking:operator_panel")
-
+        return redirect("parking:gestion")          # ✅ tu panel de gestión
+    return redirect("parking:operator_panel") 
 
 def _safe_next(request, next_url: str) -> str:
     """
@@ -231,12 +232,6 @@ def ticket_edit_paid(request, ticket_id: int):
 # =========================
 # Imprimir / reimprimir recibo
 # =========================
-
-from django.contrib.auth.decorators import login_required
-from django.shortcuts import get_object_or_404, redirect, render
-from django.urls import reverse
-from django.utils import timezone
-from django.contrib import messages  # ✅ agrega esto
 
 @login_required
 def print_receipt(request, payment_id):
@@ -1794,10 +1789,6 @@ def monthly_delete(request, pk: int):
     messages.success(request, f"Placa mensual eliminada: {plate}")
     return redirect(next_url)
 
-
-from django.core.validators import validate_email
-from django.core.exceptions import ValidationError
-
 @staff_member_required(login_url="parking:login")
 @require_POST
 def monthly_charge(request, pk: int):
@@ -2043,8 +2034,278 @@ def active_vehicles_report(request):
         "finish_url": finish_url,  # 👈 SOLO esto usa el template
     })
 
+@staff_member_required(login_url="parking:login")
+def admin_dashboard(request):
+    vehicle_types = VehicleType.objects.filter(active=True).order_by("name")
+    return render(request, "parking/admin_dashboard.html", {
+        "is_admin_dashboard": True,
+        "vehicle_types": vehicle_types,
+    })
+
+
+@staff_member_required(login_url="parking:login")
+def admin_dashboard_data(request):
+    try:
+        # --- 0) Filtros ---
+        vehicle_type = request.GET.get("vehicle_type", "ALL")  # "ALL" o id
+
+        # --- 1) Rango de fechas (default: últimos 30 días) ---
+        start_str = request.GET.get("start")
+        end_str = request.GET.get("end")
+
+        today = timezone.localdate()
+        try:
+            if start_str and end_str:
+                start_date = timezone.datetime.strptime(start_str, "%Y-%m-%d").date()
+                end_date = timezone.datetime.strptime(end_str, "%Y-%m-%d").date()
+            else:
+                raise ValueError("Sin fechas")
+        except ValueError:
+            end_date = today
+            start_date = today - timedelta(days=29)
+
+        tz = timezone.get_current_timezone()
+        start_dt = timezone.make_aware(
+            timezone.datetime.combine(start_date, timezone.datetime.min.time()), tz
+        )
+        end_dt = timezone.make_aware(
+            timezone.datetime.combine(end_date, timezone.datetime.max.time()), tz
+        )
+
+        # --- 2) KPIs (tickets) ---
+        tickets_qs = Ticket.objects.all()
+        if vehicle_type != "ALL":
+            tickets_qs = tickets_qs.filter(vehicle_type_id=vehicle_type)
+
+        tickets_active = tickets_qs.filter(status="ACTIVE").count()
+        tickets_pending = tickets_qs.filter(status="PENDING").count()
+        monthly_clients_count = MonthlyPlate.objects.count()
+
+        # Tickets pagados (según ticket)
+        tickets_paid_count = tickets_qs.filter(
+            status="PAID",
+            check_out__range=(start_dt, end_dt)
+        ).count()
+
+        # --- 3) INGRESOS SOLO PARQUEADERO (PAGADO) ---
+        # ✅ Solo Payment pagado + con ticket (parqueadero)
+        payments_qs = Payment.objects.filter(
+            status="PAID",
+            created_at__range=(start_dt, end_dt),
+        ).exclude(ticket__isnull=True)
+
+        if vehicle_type != "ALL":
+            payments_qs = payments_qs.filter(ticket__vehicle_type_id=vehicle_type)
+
+        revenue_range = int(payments_qs.aggregate(total=Sum("amount_cop")).get("total") or 0)
+
+        # --- 4) GRÁFICO DIARIO (PARQUEADERO) ---
+        qs_daily = (
+            payments_qs
+            .annotate(d=TruncDate("created_at"))
+            .values("d", "ticket__vehicle_type__name")
+            .annotate(total=Sum("amount_cop"))
+            .order_by("d", "ticket__vehicle_type__name")
+        )
+
+        delta = (end_date - start_date).days
+        daily_labels = [str(start_date + timedelta(days=i)) for i in range(delta + 1)]
+
+        by_type = {}
+        for r in qs_daily:
+            tname = r["ticket__vehicle_type__name"] or "Otros"
+            d_str = str(r["d"])
+            by_type.setdefault(tname, {})[d_str] = int(r["total"] or 0)
+
+        if vehicle_type == "ALL":
+            daily_series = [
+                {"name": t, "data": [by_type[t].get(day, 0) for day in daily_labels]}
+                for t in sorted(by_type.keys())
+            ]
+        else:
+            # una sola serie
+            tname = next(iter(by_type.keys()), "Seleccionado")
+            daily_series = [{"name": tname, "data": [by_type.get(tname, {}).get(day, 0) for day in daily_labels]}]
+
+        # --- 5) MÉTODO DE PAGO (PARQUEADERO, PAGADO) ---
+        qs_method = (
+            payments_qs
+            .values("method")
+            .annotate(total=Sum("amount_cop"))
+            .order_by("-total")
+        )
+        method_labels = [str(x["method"] or "Otros") for x in qs_method]
+        method_series = [int(x["total"] or 0) for x in qs_method]
+
+        # --- 6) ESTADO DE TICKETS (en rango) ---
+        qs_status = (
+            tickets_qs.filter(check_in__range=(start_dt, end_dt))
+            .values("status")
+            .annotate(count=Count("id"))
+            .order_by("status")
+        )
+        status_labels = [str(x["status"]) for x in qs_status]
+        status_series = [int(x["count"] or 0) for x in qs_status]
+
+        # --- 7) ÚLTIMO CIERRE ---
+        lc = Closure.objects.order_by("-date").first()
+        last_closure_data = None
+        if lc:
+            last_closure_data = {
+                "id": lc.id,
+                "date": lc.date.strftime("%Y-%m-%d %H:%M"),
+                "total": int(getattr(lc, "total_amount", 0) or 0),
+            }
+
+        return JsonResponse({
+            "filters": {"start": str(start_date), "end": str(end_date), "vehicle_type": str(vehicle_type)},
+            "kpis": {
+                "active_now": tickets_active,
+                "pending_now": tickets_pending,
+                "revenue_range": revenue_range,          # ✅ SOLO parqueadero pagado
+                "payments_paid_count": tickets_paid_count,
+                "monthly_clients_count": monthly_clients_count,
+            },
+            "charts": {
+                "daily_revenue": {"labels": daily_labels, "series": daily_series},  # ✅ parqueadero pagado
+                "payment_method_amount": {"labels": method_labels, "series": method_series},  # ✅ parqueadero pagado
+                "tickets_by_status": {"labels": status_labels, "series": status_series},
+            },
+            "last_closure": last_closure_data,
+        })
+
+    except Exception as e:
+        print("--- ERROR DASHBOARD ---")
+        print(traceback.format_exc())
+        return JsonResponse({"error": str(e)}, status=500)
+
+@staff_member_required
+def einvoices_outbox(request):
+    pending_invoices = ElectronicInvoiceOutbox.objects.filter(status="PENDING").order_by("-created_at")
+    return render(request, "parking/einvoices_outbox.html", {
+        "pending_invoices": pending_invoices
+    })
 
 
 @staff_member_required
-def admin_dashboard(request):
-    return render(request, "parking/admin_dashboard.html", {"is_admin_dashboard": True})
+def einvoice_edit(request, pk):
+    inv = get_object_or_404(ElectronicInvoiceOutbox, pk=pk, status="PENDING")
+    nxt = _safe_next(request, request.GET.get("next"))
+
+    if request.method == "POST":
+        form = EInvoiceOutboxForm(request.POST, instance=inv)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Registro actualizado.")
+            return redirect(nxt or reverse("parking:einvoices_outbox"))
+        messages.error(request, "Revisa los campos marcados.")
+    else:
+        form = EInvoiceOutboxForm(instance=inv)
+
+    return render(request, "parking/einvoice_edit.html", {
+        "inv": inv,
+        "form": form,
+        "next": nxt,  # para mantener tu template igual
+    })
+
+
+@staff_member_required
+def einvoice_delete(request, pk):
+    inv = get_object_or_404(ElectronicInvoiceOutbox, pk=pk)
+    nxt = _safe_next(request, request.GET.get("next"))
+
+    if request.method == "POST":
+        inv.delete()
+        messages.success(request, "Registro eliminado.")
+        return redirect(nxt or reverse("parking:einvoices_outbox"))
+
+    # si prefieres no tener confirm template, puedes eliminar directo en POST desde el botón
+    messages.error(request, "Método no permitido.")
+    return redirect(nxt or reverse("parking:einvoices_outbox"))
+
+
+@staff_member_required
+def einvoice_retry(request, pk):
+    inv = get_object_or_404(ElectronicInvoiceOutbox, pk=pk, status="PENDING")
+    nxt = _safe_next(request, request.GET.get("next"))
+
+    if request.method != "POST":
+        messages.error(request, "Método no permitido.")
+        return redirect(nxt or reverse("parking:einvoices_outbox"))
+
+    # ✅ registra intento (aunque falle)
+    inv.last_attempt_at = timezone.now()
+    inv.save(update_fields=["last_attempt_at"])
+
+    try:
+        result = emit_electronic_invoice_preview(
+            id_number=inv.id_number,
+            full_name=inv.full_name,
+            email=inv.email,
+            total_amount_cop=int(inv.total_amount_cop),
+        )
+
+        # ✅ NUEVA REGLA: si no hay excepción, asumimos éxito,
+        # salvo que el retorno indique explícitamente un error.
+        err = None
+        if isinstance(result, dict):
+            err = result.get("error") or result.get("errors") or result.get("message_error")
+
+        if err:
+            inv.last_error = str(err)[:2000]
+            inv.save(update_fields=["last_error"])
+            messages.error(request, f"No se pudo enviar: {err}")
+        else:
+            inv.delete()
+            messages.success(request, "Factura enviada exitosamente. El registro pendiente fue eliminado.")
+
+        return redirect(nxt or reverse("parking:einvoices_outbox"))
+
+    except Exception as e:
+        inv.last_error = str(e)[:2000]
+        inv.save(update_fields=["last_error"])
+        messages.error(request, f"No se pudo enviar: {e}")
+        return redirect(nxt or reverse("parking:einvoices_outbox"))
+
+
+@staff_member_required
+def einvoices_retry_all(request):
+    nxt = _safe_next(request, request.GET.get("next"))
+    qs = ElectronicInvoiceOutbox.objects.filter(status="PENDING").order_by("created_at")
+
+    ok, fail = 0, 0
+    now = timezone.now()
+
+    # (opcional) marca intento masivo de una vez
+    qs.update(last_attempt_at=now)
+
+    for inv in qs:
+        try:
+            result = emit_electronic_invoice_preview(
+                id_number=inv.id_number,
+                full_name=inv.full_name,
+                email=inv.email,
+                total_amount_cop=int(inv.total_amount_cop),
+            )
+
+            # ✅ NUEVA REGLA: éxito si no hay excepción,
+            # salvo que el retorno indique explícitamente un error.
+            err = None
+            if isinstance(result, dict):
+                err = result.get("error") or result.get("errors") or result.get("message_error")
+
+            if err:
+                inv.last_error = str(err)[:2000]
+                inv.save(update_fields=["last_error"])
+                fail += 1
+            else:
+                inv.delete()
+                ok += 1
+
+        except Exception as e:
+            inv.last_error = str(e)[:2000]
+            inv.save(update_fields=["last_error"])
+            fail += 1
+
+    messages.success(request, f"Reintentos finalizados. OK: {ok} | Error: {fail}")
+    return redirect(nxt or reverse("parking:einvoices_outbox"))

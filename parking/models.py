@@ -444,6 +444,7 @@ class Ticket(models.Model):
 
         - PARKING:
             * 06:00–18:00 => cobra HOUR (hora/fracción) según day_type del día
+            ✅ EXCEPCIÓN: si day_type es SUNDAY u HOLIDAY, cobra tarifa completa (1 vez) por franja tocada
             * 18:00–06:00 => cobra NIGHT (noche/fracción) según day_type de la fecha del inicio de noche (18:00)
             * Si cruza segmentos, suma cada segmento con su tarifa correspondiente.
         - WORKSHOP:
@@ -496,17 +497,24 @@ class Ticket(models.Model):
             dt = get_day_type_for_date(anchor_date)
 
             if bu == "HOUR":
-                minutes = max(1, int(math.ceil(seconds / 60.0)))
-                hours = int(math.ceil(minutes / 60.0))
-                hours = max(1, hours)
                 price = self._get_rateplan_price("PARKING", "HOUR", dt)
-                base += int(hours * price)
+
+                # ✅ CAMBIO PEDIDO: Domingo/Festivo (06:00–18:00) = tarifa plana por franja tocada
+                if dt in ("SUNDAY", "HOLIDAY"):
+                    base += int(price)
+                else:
+                    minutes = max(1, int(math.ceil(seconds / 60.0)))
+                    hours = int(math.ceil(minutes / 60.0))
+                    hours = max(1, hours)
+                    base += int(hours * price)
+
             else:
                 # NIGHT: noche/fracción => 1 por bloque tocado
                 price = self._get_rateplan_price("PARKING", "NIGHT", dt)
                 base += int(price)
 
         return base + extra_service + extra_work
+
 
     # ✅ helper opcional (no rompe nada existente)
     def mark_paid(self, user=None, end_time=None):
@@ -608,3 +616,102 @@ class MonthlyPlate(models.Model):
 
     def __str__(self):
         return self.plate
+# ============================================================
+# Outbox temporal de Facturación Electrónica
+# ============================================================
+
+class ElectronicInvoiceOutbox(models.Model):
+    """
+    Bandeja temporal para facturación electrónica cuando:
+      - el cliente no existe
+      - falla la conexión / proveedor
+      - hay error externo
+
+    Regla clave:
+      - SENT no se persiste:
+          * si se envía bien → no se guarda
+          * si estaba en PENDING y se envía bien → se elimina
+    """
+
+    STATUS_CHOICES = [
+        ("PENDING", "Pendiente"),
+        ("SENT", "Enviada"),  # solo conceptual, no persistente
+    ]
+
+    # ===== Payload mínimo =====
+    id_number = models.CharField("Cédula o NIT", max_length=30, db_index=True)
+    full_name = models.CharField("Nombre o razón social", max_length=160)
+    email = models.EmailField("Correo electrónico", max_length=254)
+    total_amount_cop = models.PositiveIntegerField(default=0)
+
+    # ===== Control =====
+    status = models.CharField(
+        max_length=10,
+        choices=STATUS_CHOICES,
+        default="PENDING",
+        db_index=True,
+    )
+
+    last_error = models.TextField("Último error", blank=True, default="")
+    last_attempt_at = models.DateTimeField("Último intento", null=True, blank=True)
+
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["status", "-created_at"]),
+            models.Index(fields=["id_number"]),
+        ]
+
+    def clean(self):
+        super().clean()
+
+        # Normalización exacta al payload
+        self.id_number = (self.id_number or "").strip()
+        self.full_name = (self.full_name or "").strip()
+        self.email = (self.email or "").strip()
+        self.total_amount_cop = int(self.total_amount_cop or 0)
+
+        if not self.id_number:
+            raise ValidationError({"id_number": "Este campo es obligatorio."})
+        if not self.full_name:
+            raise ValidationError({"full_name": "Este campo es obligatorio."})
+        if self.total_amount_cop < 0:
+            raise ValidationError({"total_amount_cop": "No puede ser negativo."})
+
+    def save(self, *args, **kwargs):
+        """
+        SENT nunca se guarda.
+        """
+        if self.status == "SENT":
+            return
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    # =========================
+    # Helpers de flujo
+    # =========================
+
+    def mark_failed(self, message: str = ""):
+        """
+        Se llama cuando falla el envío.
+        Garantiza que quede en PENDING.
+        """
+        self.status = "PENDING"
+        self.last_attempt_at = timezone.now()
+        self.last_error = (message or "").strip()
+        self.save(update_fields=[
+            "status", "last_attempt_at", "last_error", "updated_at"
+        ])
+
+    def mark_sent(self):
+        """
+        Se llama cuando el envío fue exitoso.
+        Elimina el registro si existía.
+        """
+        self.delete()
+
+    def __str__(self):
+        return f"FE Outbox #{self.id} - PENDING - {self.id_number} - {self.total_amount_cop} COP"
