@@ -1,76 +1,96 @@
 
+---
 
-# Parqueadero – Django + PostgreSQL (macOS)
+# Parqueadero – Django + PostgreSQL
 
-Sistema básico de parqueadero desarrollado en Django, con:
-
-* **Administrador**: gestión de tarifas y tipos de vehículo desde Django Admin.
-* **Operario**: registro de ingreso y cobro de vehículos.
+Sistema de parqueadero desarrollado en **Django** con base de datos **PostgreSQL**, orientado a operación diaria (ingreso y cobro) y administración de tarifas.
 
 ---
 
-## Requisitos del sistema
+## Requisitos generales
 
-* macOS
-* Homebrew
-* Python **3.11**
-* PostgreSQL **16** (instalado con Homebrew)
+* **Python 3.11**
+* **Git**
+* **PostgreSQL 16**
+* Acceso a terminal
 
----
-
-## 0) Instalar Homebrew
-
-Homebrew **no viene instalado por defecto en macOS**.
-Ejecuta este comando **una sola vez** en la terminal:
-
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-```
-
-Al finalizar, agrega Homebrew al `PATH` (Apple Silicon):
-
-```bash
-echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
-eval "$(/opt/homebrew/bin/brew shellenv)"
-```
-
-Verificar instalación:
-
-```bash
-brew --version
-```
+  * macOS: Terminal
+  * Windows: PowerShell
 
 ---
 
-## 1) Instalar Python 3.11 con Homebrew
+## 1) Instalar Python 3.11
 
-Actualizar Homebrew e instalar Python 3.11:
+### macOS
+
+Usando Homebrew:
 
 ```bash
 brew update
 brew install python@3.11
 ```
 
-Verificar instalación:
+Verificar:
 
 ```bash
 python3.11 --version
 ```
 
-> Si el comando no es reconocido, abre una nueva terminal.
-
 ---
 
-## 2) Clonar el repositorio
+### Windows
 
-```bash
-git clone https://github.com/Daprosero/parqueadero-django.git
-cd Parqueadero
+1. Descargar desde:
+   [https://www.python.org/downloads/release/python-311/](https://www.python.org/downloads/release/python-311/)
+
+2. Durante la instalación:
+
+   * ✅ Add Python to PATH
+   * ✅ Install for all users
+
+Verificar:
+
+```powershell
+python --version
 ```
 
 ---
 
-## 3) Crear y activar entorno virtual (Python 3.11)
+## 2) Instalar Git
+
+### macOS
+
+```bash
+brew install git
+```
+
+### Windows
+
+Descargar desde:
+[https://git-scm.com/download/win](https://git-scm.com/download/win)
+
+Verificar (ambos sistemas):
+
+```bash
+git --version
+```
+
+---
+
+## 3) Clonar el repositorio
+
+### macOS / Windows
+
+```bash
+git clone https://github.com/Daprosero/parqueadero-django.git
+cd parqueadero-django
+```
+
+---
+
+## 4) Crear y activar entorno virtual
+
+### macOS
 
 ```bash
 python3.11 -m venv .venv
@@ -78,7 +98,17 @@ source .venv/bin/activate
 python --version
 ```
 
-Actualizar `pip` e instalar dependencias:
+---
+
+### Windows
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+python --version
+```
+
+Actualizar `pip` e instalar dependencias (ambos sistemas):
 
 ```bash
 python -m pip install --upgrade pip
@@ -87,40 +117,62 @@ pip install -r requirements.txt
 
 ---
 
-## 4) Instalar PostgreSQL 16 con Homebrew
+## 5) Instalar PostgreSQL 16
 
-Instalar PostgreSQL:
+### macOS
 
 ```bash
 brew install postgresql@16
 ```
 
-Agregar `psql` al `PATH` (necesario en Macs con Apple Silicon):
+Agregar al PATH (Apple Silicon):
 
 ```bash
 echo 'export PATH="/opt/homebrew/opt/postgresql@16/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
-psql --version
 ```
 
-Iniciar el servicio de PostgreSQL:
+Iniciar servicio:
 
 ```bash
 brew services start postgresql@16
-brew services list | grep postgres
 ```
 
 ---
 
-## 5) Crear usuario y base de datos (una sola vez)
+### Windows
 
-Entrar a PostgreSQL:
+1. Descargar desde:
+   [https://www.postgresql.org/download/windows/](https://www.postgresql.org/download/windows/)
 
-```bash
-psql postgres
+2. Durante la instalación:
+
+   * Guardar contraseña del usuario `postgres`
+   * Puerto por defecto: `5432`
+
+Si `psql` no se reconoce, agregar al PATH:
+
+```
+C:\Program Files\PostgreSQL\16\bin
 ```
 
-Dentro de `psql`, ejecutar:
+Verificar (ambos sistemas):
+
+```bash
+psql --version
+```
+
+---
+
+## 6) Crear usuario y base de datos
+
+### macOS / Windows
+
+```bash
+psql -U postgres
+```
+
+Ejecutar dentro de PostgreSQL:
 
 ```sql
 CREATE USER parking_user WITH PASSWORD '123456';
@@ -131,7 +183,9 @@ GRANT ALL PRIVILEGES ON DATABASE parking_db TO parking_user;
 
 ---
 
-## 6) Crear las tablas del sistema (migraciones)
+## 7) Ejecutar migraciones
+
+### macOS / Windows
 
 ```bash
 python manage.py makemigrations
@@ -140,7 +194,9 @@ python manage.py migrate
 
 ---
 
-## 7) Crear usuario administrador (superusuario)
+## 8) Crear usuario administrador
+
+### macOS / Windows
 
 ```bash
 python manage.py createsuperuser
@@ -148,50 +204,12 @@ python manage.py createsuperuser
 
 ---
 
-## 8) Crear datos iniciales (tarifas y tipos de vehículo)
+## 9) Ejecutar el servidor de desarrollo
 
-Ejecutar el comando de inicialización:
-
-```bash
-python manage.py seed_rates
-```
-
-Este comando:
-
-* Crea tipos de vehículo (Moto, Carro, Camioneta)
-* Crea tarifas iniciales con valores aleatorios
-* Se utiliza solo para inicializar el sistema
-
----
-
-## 9) Crear usuario Operario
-
-Desde el panel de administración:
-
-1. Ir a **Users → Add user**
-2. Crear un usuario (ejemplo: `operario1`)
-3. Configurar:
-
-   * **Active**: ✅
-   * **Staff status**: ❌
-   * **Superuser status**: ❌
-
----
-
-## 10) Ejecutar el servidor de desarrollo
+### macOS / Windows
 
 ```bash
 python manage.py runserver
 ```
 
-Rutas disponibles:
-
-* **Administrador**
-  [http://127.0.0.1:8000/admin/](http://127.0.0.1:8000/admin/)
-
-* **Operario – Ingreso**
-  [http://127.0.0.1:8000/operario/ingreso/](http://127.0.0.1:8000/operario/ingreso/)
-
-* **Operario – Cobro**
-  [http://127.0.0.1:8000/operario/cobro/](http://127.0.0.1:8000/operario/cobro/)
-
+---
