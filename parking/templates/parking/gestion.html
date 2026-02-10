@@ -1524,6 +1524,13 @@
         el.addEventListener("change", validate);
         el.addEventListener("blur", validate);
       });
+      // ✅ FIX: si el select está disabled (Taller), igual debe enviarse en el POST
+      form.addEventListener("submit", function () {
+        if (vUnit && vUnit.disabled) {
+          vUnit.disabled = false;   // permitir que viaje en el POST
+        }
+      });
+
     })();
   </script>
 {% endif %}
