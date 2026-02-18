@@ -5,18 +5,63 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 from django.core.exceptions import ValidationError
-
+from django.apps import apps
 
 # ============================================================
 # Helpers de calendario / day_type (NORMAL / SUNDAY / HOLIDAY)
 # ============================================================
+from django.db import models
+class ActiveVehiclesReport(models.Model):
+    created_at = models.DateTimeField(auto_now_add=True)
+    consecutive = models.PositiveIntegerField(unique=True)
+    active_count = models.PositiveIntegerField(default=0)
+
+    def __str__(self):
+        return f"Reporte Activos #{self.consecutive:05d}"
+
+class BusinessInfo(models.Model):
+    name = models.CharField("Nombre del negocio", max_length=150)
+    owner_name = models.CharField("Propietario", max_length=150, blank=True)
+    nit = models.CharField("NIT", max_length=30)
+    phone = models.CharField("Celular", max_length=30, blank=True)
+    email = models.EmailField("Correo electrónico", blank=True)
+
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "BusinessInfo"
+        verbose_name_plural = "BusinessInfo"
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        """
+        Fuerza comportamiento tipo singleton:
+        solo puede existir 1 registro.
+        """
+        if not self.pk and BusinessInfo.objects.exists():
+            raise ValueError("Solo puede existir un único registro de Información del Negocio.")
+        super().save(*args, **kwargs)
 
 def _holidays_set():
     """
-    Lee festivos desde settings (opcional):
-      - PARKING_HOLIDAYS = ["2026-01-01", ...]
-      - o HOLIDAYS = ["2026-01-01", ...]
+    Prioridad:
+      1) BD (modelo Holiday) si existe y hay registros activos
+      2) settings.PARKING_HOLIDAYS / settings.HOLIDAYS (fallback)
+    Devuelve un set de strings 'YYYY-MM-DD'.
     """
+    # 1) Intentar BD (sin romper si no hay migraciones/tabla)
+    try:
+        Holiday = apps.get_model("parking", "Holiday")  # <-- cambia "parking" si tu app se llama distinto
+        qs = Holiday.objects.filter(active=True).values_list("date", flat=True)
+        db_dates = {d.isoformat() for d in qs}
+        if db_dates:
+            return db_dates
+    except Exception:
+        pass
+
+    # 2) Fallback: settings
     holidays = getattr(settings, "PARKING_HOLIDAYS", None)
     if holidays is None:
         holidays = getattr(settings, "HOLIDAYS", None)
@@ -65,12 +110,69 @@ def _localize(dt):
 #                 iniciada el 2026-01-24 18:00.
 # ============================================================
 
-DAY_START = time(6, 0)
-NIGHT_START = time(18, 0)
+DEFAULT_DAY_START = time(6, 0)
+DEFAULT_NIGHT_START = time(18, 0)
+class WorkType(models.Model):
+    code = models.CharField(max_length=30, unique=True)
+    name = models.CharField(max_length=80)
+    active = models.BooleanField(default=True)
 
+    class Meta:
+        ordering = ("name",)
+        verbose_name = "WorkType"
+        verbose_name_plural = "WorkType"
+
+    def __str__(self):
+        return self.name
+
+class Holiday(models.Model):
+    date = models.DateField("Fecha festiva", unique=True, db_index=True)
+    name = models.CharField("Nombre/nota", max_length=120, blank=True, default="")
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Holiday"
+        verbose_name_plural = "Holiday"
+        ordering = ("-date",)
+
+    def __str__(self):
+        label = self.date.strftime("%Y-%m-%d")
+        return f"{label}{' - ' + self.name if self.name else ''}"
+
+
+class SystemSettings(models.Model):
+    day_start = models.TimeField(default=DEFAULT_DAY_START, verbose_name="Inicio Jornada Día")
+    night_start = models.TimeField(default=DEFAULT_NIGHT_START, verbose_name="Inicio Jornada Noche")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Time Window"
+        verbose_name_plural = "Time Window"
+
+    def __str__(self):
+        return f"Día: {self.day_start.strftime('%H:%M')} | Noche: {self.night_start.strftime('%H:%M')}"
+
+
+def get_day_night_boundaries():
+    """
+    Lee horarios desde SystemSettings (admin).
+    Fallback seguro si no existe tabla/registro (migraciones, arranque).
+    """
+    try:
+        Settings = apps.get_model("parking", "SystemSettings")  # <-- cambia "parking" si tu app tiene otro nombre
+        obj = Settings.objects.first()
+        if obj:
+            return obj.day_start, obj.night_start
+    except Exception:
+        pass
+    return DEFAULT_DAY_START, DEFAULT_NIGHT_START
 def iter_pricing_segments(start_dt, end_dt):
     if not start_dt or not end_dt or end_dt <= start_dt:
         return
+
+    # ✅ NUEVO: límites dinámicos desde admin
+    DAY_START, NIGHT_START = get_day_night_boundaries()
 
     s = _localize(start_dt)
     e = _localize(end_dt)
@@ -100,30 +202,21 @@ def iter_pricing_segments(start_dt, end_dt):
         if seg_end > cur:
             yield (cur, seg_end, billing_unit, anchor_date)
         cur = seg_end
-
-
-
 def count_night_blocks_overlapped(start_dt, end_dt) -> int:
-    """
-    Cuenta cuántos BLOQUES de noche (18:00 -> 06:00) son tocados por el intervalo.
-    Cobro "noche/fracción": si toca una noche, cuenta 1.
-    """
     n = 0
     for _, __, bu, ___ in iter_pricing_segments(start_dt, end_dt):
         if bu == "NIGHT":
             n += 1
     return n
-
-
-# Mantengo el nombre por compatibilidad con tu código previo,
-# pero ahora cuenta noches según 18:00 -> 06:00 (noche/fracción).
-def count_nights_between(start_dt, end_dt, night_start=time(18, 0)) -> int:
+def count_nights_between(start_dt, end_dt, night_start=None) -> int:
     """
     Compatibilidad:
-    Para tu nueva lógica, lo correcto es contar bloques de noche tocados.
+    Tu lógica real cuenta bloques NIGHT tocados (según config admin).
+    Si alguien pasaba night_start, no rompemos la firma.
     """
+    if night_start is None:
+        _, night_start = get_day_night_boundaries()
     return count_night_blocks_overlapped(start_dt, end_dt)
-
 
 # ============================================================
 # Modelos
@@ -186,6 +279,8 @@ class RatePlan(models.Model):
     CLIENT_KIND_CHOICES = [
         ("PARKING", "Parqueadero"),
         ("WORKSHOP", "Taller"),
+        ("SERVICE", "Servicio"),
+
     ]
 
     BILLING_UNIT_CHOICES = [
@@ -250,6 +345,9 @@ class RatePlan(models.Model):
             raise ValidationError({
                 "billing_unit": "Para Parqueadero la unidad debe ser 'Hora / Fracción' (HOUR) o 'Noche' (NIGHT)."
             })
+        # ✅ SERVICE: no debería depender de RatePlan
+        if ck == "SERVICE":
+            raise ValidationError({"client_kind": "El tipo 'Servicio' no usa planes de tarifa (RatePlan)."})
 
     def save(self, *args, **kwargs):
         self.full_clean()
@@ -291,18 +389,111 @@ class Ticket(models.Model):
         ("PAID", "Paid"),          # pagado/cerrado definitivamente
     ]
 
-    WORK_TYPE_CHOICES = [
-        ("NONE", "Ninguno"),
-        ("EMBARILLADO", "Embarillado"),
-        ("DESEMBARILLADO", "Des-embarillado"),
-        ("ENCARPADO", "Encarpado"),
-        ("OTHER", "Otros"),
-    ]
+    
 
     CLIENT_KIND_CHOICES = [
         ("PARKING", "Parqueadero"),
         ("WORKSHOP", "Taller"),
+        ("SERVICE", "Servicio"),
     ]
+
+    # ✅ NUEVO: FK real
+    work_type_fk = models.ForeignKey(
+        "WorkType",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="tickets",
+    )
+
+    # ✅ LEGACY: texto que tu sistema ya usa en mil partes
+    work_type_text = models.CharField(max_length=40, default="NONE", blank=True)
+
+    # -------------------------
+    # ✅ COMPATIBILIDAD TOTAL:
+    # ticket.work_type se comporta como string
+    # -------------------------
+    @property
+    def work_type(self) -> str:
+        """
+        Siempre devuelve un string en MAYÚSCULAS:
+        - Si hay FK: usa WorkType.code
+        - Si no: usa work_type_text
+        """
+        if self.work_type_fk_id:
+            code = (getattr(self.work_type_fk, "code", "") or "").strip().upper()
+            return code or "NONE"
+        return (self.work_type_text or "NONE").strip().upper() or "NONE"
+
+    @work_type.setter
+    def work_type(self, value):
+        """
+        Permite asignar:
+        - string ("NONE", "LAVADO")
+        - WorkType instance
+        - None
+        Mantiene sincronizados:
+        - work_type_fk
+        - work_type_text (MAYÚSCULAS)
+        """
+        # None / vacío / NONE => limpia
+        if value is None or (isinstance(value, str) and value.strip().upper() in ("", "NONE")):
+            self.work_type_fk = None
+            self.work_type_text = "NONE"
+            return
+
+        # si pasan objeto WorkType (instancia)
+        # (no importamos nada: solo verificamos que parezca WorkType)
+        if hasattr(value, "pk") and hasattr(value, "code"):
+            self.work_type_fk = value
+            self.work_type_text = (getattr(value, "code", "") or "").strip().upper() or "NONE"
+            return
+
+        # si pasan string
+        if isinstance(value, str):
+            s = value.strip().upper()
+            self.work_type_text = s or "NONE"
+
+            # intenta mapear al FK si existe (si no existe, no revienta)
+            try:
+                wt = WorkType.objects.filter(code__iexact=self.work_type_text).first()
+            except Exception:
+                wt = None
+
+            self.work_type_fk = wt
+            return
+
+        # fallback: cualquier cosa rara => NONE
+        self.work_type_fk = None
+        self.work_type_text = "NONE"
+
+
+    def save(self, *args, **kwargs):
+        """
+        ✅ Blindaje:
+        - Si alguien cambia work_type_fk directamente, sincronizamos el texto.
+        - Si alguien cambia work_type_text, normalizamos y limpiamos FK si corresponde.
+        """
+        if self.work_type_fk_id:
+            self.work_type_text = (getattr(self.work_type_fk, "code", "") or "").strip().upper() or "NONE"
+        else:
+            self.work_type_text = (self.work_type_text or "NONE").strip().upper() or "NONE"
+            if self.work_type_text == "NONE":
+                self.work_type_fk = None
+
+        super().save(*args, **kwargs)
+
+    def get_work_type_display(self):
+        """
+        Para compatibilidad con tu print_receipt:
+        - Si hay FK: muestra WorkType.name
+        - Si no: muestra el code (string)
+        """
+        if self.work_type_fk_id:
+            name = (getattr(self.work_type_fk, "name", "") or "").strip()
+            return name or self.work_type
+        return self.work_type
+
 
     plate = models.CharField(max_length=12, db_index=True)
     vehicle_type = models.ForeignKey(VehicleType, on_delete=models.PROTECT)
@@ -343,12 +534,6 @@ class Ticket(models.Model):
 
     service_type = models.CharField(max_length=80, default="NONE")
     service_amount_cop = models.PositiveIntegerField(default=0)
-
-    work_type = models.CharField(
-        max_length=20,
-        choices=WORK_TYPE_CHOICES,
-        default="NONE",
-    )
     work_amount_cop = models.PositiveIntegerField(default=0)
 
     created_by = models.ForeignKey(
@@ -461,7 +646,10 @@ class Ticket(models.Model):
         extra_service = int(self.service_amount_cop or 0)
 
         kind = (self.client_kind or "PARKING").strip().upper()
-
+        # ✅ NUEVO: SERVICE no cobra parqueo nunca
+        if kind == "SERVICE":
+            base = 0
+            return base + extra_service + extra_work
         # Base = parqueadero/taller según reglas
         base = 0
 
@@ -620,31 +808,31 @@ class MonthlyPlate(models.Model):
 # Outbox temporal de Facturación Electrónica
 # ============================================================
 
+from django.db import models
+from django.utils import timezone
+from django.core.exceptions import ValidationError
+import hashlib
+import json
+
 class ElectronicInvoiceOutbox(models.Model):
-    """
-    Bandeja temporal para facturación electrónica cuando:
-      - el cliente no existe
-      - falla la conexión / proveedor
-      - hay error externo
-
-    Regla clave:
-      - SENT no se persiste:
-          * si se envía bien → no se guarda
-          * si estaba en PENDING y se envía bien → se elimina
-    """
-
     STATUS_CHOICES = [
         ("PENDING", "Pendiente"),
-        ("SENT", "Enviada"),  # solo conceptual, no persistente
+        ("SENT", "Enviada"),  # conceptual, no persistente
     ]
 
-    # ===== Payload mínimo =====
     id_number = models.CharField("Cédula o NIT", max_length=30, db_index=True)
     full_name = models.CharField("Nombre o razón social", max_length=160)
     email = models.EmailField("Correo electrónico", max_length=254)
+
+    # ✅ NUEVO: items reales
+    items = models.JSONField(default=list, blank=True)
+
+    # (se mantiene por compatibilidad / UI)
     total_amount_cop = models.PositiveIntegerField(default=0)
 
-    # ===== Control =====
+    # ✅ Opcional (recomendado): hash para upsert “idéntico”
+    items_hash = models.CharField(max_length=64, blank=True, db_index=True, default="")
+
     status = models.CharField(
         max_length=10,
         choices=STATUS_CHOICES,
@@ -663,16 +851,66 @@ class ElectronicInvoiceOutbox(models.Model):
         indexes = [
             models.Index(fields=["status", "-created_at"]),
             models.Index(fields=["id_number"]),
+            models.Index(fields=["items_hash"]),
         ]
+
+    def _compute_items_hash(self) -> str:
+        """
+        Hash estable para evitar duplicados.
+        Normaliza keys relevantes (plate/price).
+        """
+        try:
+            norm = []
+            for it in (self.items or []):
+                if not isinstance(it, dict):
+                    continue
+                plate = (it.get("plate") or "").strip().upper()
+                try:
+                    price = int(it.get("price") or 0)
+                except Exception:
+                    price = 0
+                if plate and price > 0:
+                    norm.append({"plate": plate, "price": price})
+            payload = json.dumps(norm, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        except Exception:
+            return ""
 
     def clean(self):
         super().clean()
 
-        # Normalización exacta al payload
         self.id_number = (self.id_number or "").strip()
         self.full_name = (self.full_name or "").strip()
         self.email = (self.email or "").strip()
-        self.total_amount_cop = int(self.total_amount_cop or 0)
+
+        if self.status == "SENT":
+            return
+
+        # ✅ valida items
+        if not isinstance(self.items, list) or not self.items:
+            raise ValidationError({"items": "Debe incluir al menos un ítem."})
+
+        # recalcula total desde items para coherencia
+        total = 0
+        cleaned = []
+        for i, it in enumerate(self.items, 1):
+            if not isinstance(it, dict):
+                raise ValidationError({"items": f"Ítem {i}: formato inválido."})
+            plate = (it.get("plate") or "").strip().upper()
+            try:
+                price = int(it.get("price") or 0)
+            except Exception:
+                price = 0
+            if not plate:
+                raise ValidationError({"items": f"Ítem {i}: falta 'plate'."})
+            if price <= 0:
+                raise ValidationError({"items": f"Ítem {i}: 'price' debe ser > 0."})
+            cleaned.append({"plate": plate, "price": price})
+            total += price
+
+        self.items = cleaned
+        self.total_amount_cop = int(total)
+        self.items_hash = self._compute_items_hash()
 
         if not self.id_number:
             raise ValidationError({"id_number": "Este campo es obligatorio."})
@@ -682,36 +920,34 @@ class ElectronicInvoiceOutbox(models.Model):
             raise ValidationError({"total_amount_cop": "No puede ser negativo."})
 
     def save(self, *args, **kwargs):
-        """
-        SENT nunca se guarda.
-        """
         if self.status == "SENT":
             return
         self.full_clean()
         return super().save(*args, **kwargs)
 
-    # =========================
-    # Helpers de flujo
-    # =========================
-
     def mark_failed(self, message: str = ""):
-        """
-        Se llama cuando falla el envío.
-        Garantiza que quede en PENDING.
-        """
         self.status = "PENDING"
         self.last_attempt_at = timezone.now()
         self.last_error = (message or "").strip()
-        self.save(update_fields=[
-            "status", "last_attempt_at", "last_error", "updated_at"
-        ])
+        self.save(update_fields=["status", "last_attempt_at", "last_error", "updated_at"])
 
     def mark_sent(self):
-        """
-        Se llama cuando el envío fue exitoso.
-        Elimina el registro si existía.
-        """
         self.delete()
 
     def __str__(self):
         return f"FE Outbox #{self.id} - PENDING - {self.id_number} - {self.total_amount_cop} COP"
+
+class MonthlyReceipt(models.Model):
+    created_at = models.DateTimeField(auto_now_add=True)
+    consecutive = models.PositiveIntegerField(unique=True)
+    amount_cop = models.PositiveIntegerField(default=0)
+
+    def __str__(self):
+        return f"Recibo Mensual #{self.consecutive}"
+class CompanyReceiptNumber(models.Model):
+    created_at = models.DateTimeField(auto_now_add=True)
+    consecutive = models.PositiveIntegerField(unique=True)
+    amount_cop = models.PositiveIntegerField(default=0)
+
+    def __str__(self):
+        return f"Recibo Empresa #{self.consecutive}"

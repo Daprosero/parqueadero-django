@@ -62,12 +62,33 @@
 
     <!-- Encabezado Negocio -->
     <div class="header text-center">
-        <div class="business-name uppercase">Parqueadero Los Cambulos</div>
-        <div>Nit: 75081166-3</div>
-        <div class="uppercase">Jorge Eliecer Quiceno</div>
-        <div>Correo: parqueaderoloscambulos@gmail.com</div>
-        <div>Cel: 312 277 5300</div>
+        <div class="business-name uppercase">
+            {{ BUSINESS_INFO.name }}
+        </div>
+
+        <div>
+            Nit: {{ BUSINESS_INFO.nit }}
+        </div>
+
+        {% if BUSINESS_INFO.owner_name %}
+            <div class="uppercase">
+                {{ BUSINESS_INFO.owner_name }}
+            </div>
+        {% endif %}
+
+        {% if BUSINESS_INFO.email %}
+            <div>
+                Correo: {{ BUSINESS_INFO.email }}
+            </div>
+        {% endif %}
+
+        {% if BUSINESS_INFO.phone %}
+            <div>
+                Cel: {{ BUSINESS_INFO.phone }}
+            </div>
+        {% endif %}
     </div>
+
 
     <div class="dashed-line"></div>
 
@@ -118,7 +139,7 @@
     <!-- Tarifas -->
     <div class="row">
         <span class="label bold">
-            {% if is_taller %}Parqueadero (Noches):{% else %}Parqueadero (Horas):{% endif %}
+            {% if is_taller %}Parqueadero (Noches):{% else %}Parqueadero:{% endif %}
         </span>
         <span class="bold">${{ parking_val_fmt }}</span>
     </div>

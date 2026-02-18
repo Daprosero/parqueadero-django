@@ -460,6 +460,10 @@
             <small id="plateErrorActive" style="color:#dc3545; display:none; margin-top:6px; font-weight:700;">
               ⛔ El vehículo ya se encuentra dentro del parqueadero.
             </small>
+            <small id="plateErrorMonthly" style="color:#dc3545; display:none; margin-top:6px; font-weight:700;">
+              ⛔ Esta placa es CLIENTE MENSUAL. Debe registrarse por el módulo de mensualidades.
+            </small>
+
           </p>
 
           <div id="checkinGateBlock" style="display:none;">
@@ -482,9 +486,10 @@
       {% if mode == "charge" %}
         <a href="?mode=menu" class="back-link">← Volver al Menú</a>
 
-        <form method="post" id="closeForm">
+        <form method="post" id="closeForm" action="?mode=charge">
           <div class="card-title">Procesar Salida</div>
           {% csrf_token %}
+          {{ close_form.ticket_id }}
 
           <p>
             {{ close_form.plate.label_tag }}
@@ -498,6 +503,10 @@
             <small id="plateErrorCloseFormat" style="color:#dc3545; display:none; margin-top:6px; font-weight:700;">
               La placa debe ser alfanumérica (A-Z, 0-9) y de 3 a 12 caracteres.
             </small>
+            <small id="plateErrorCloseMonthly" style="color:#dc3545; display:none; margin-top:6px; font-weight:700;">
+              ⛔ Esta placa es CLIENTE MENSUAL. No se cobra desde este módulo.
+            </small>
+
           </p>
 
           <div id="paymentGateBlock" style="display:none;">
@@ -522,10 +531,32 @@
             </p>
 
             <p id="idRow">
-              {{ close_form.id_number.label_tag }}
-              {{ close_form.id_number }}
+              <label style="font-weight:700; font-size:0.9rem; color:var(--text-main);">
+                Buscar Cliente
+              </label>
+
+              <!-- ✅ Campo búsqueda por nombre -->
+              <input id="customerNameSearch"
+                    type="text"
+                    placeholder="Escribe el nombre del cliente…"
+                    style="margin-top:6px;" />
+
+              <!-- ✅ Contenedor sugerencias -->
+              <div id="customerSuggestions"
+                  style="display:none; margin-top:8px; border:1px solid var(--border); border-radius:10px; overflow:hidden; background:#fff;">
+              </div>
+
+              <!-- 🔒 Campo NIT oculto (se llena automáticamente) -->
+              <div id="nitRow" style="display:none; margin-top:10px;">
+                {{ close_form.id_number.label_tag }}
+                {{ close_form.id_number }}
+              </div>
+
+
               <span id="customerHint" class="hint-chip" style="display:none;"></span>
             </p>
+
+
 
             <p id="nameRow">
               {{ close_form.full_name.label_tag }}
@@ -540,7 +571,19 @@
 
             <p id="workTypeRow">
               {{ close_form.work_type.label_tag }}
-              {{ close_form.work_type }}
+              <select name="{{ close_form.work_type.name }}" id="{{ close_form.work_type.id_for_label }}">
+                <option value="">Seleccione servicio...</option>
+
+                {% for opt in close_form.work_type.field.queryset %}
+                  <option value="{{ opt.pk }}"
+                          {% if close_form.work_type.value|stringformat:"s" == opt.pk|stringformat:"s" %}selected{% endif %}
+                          {% if opt.code == "NONE" %}data-none="1"{% endif %}>
+                    {{ opt.name }}
+                  </option>
+                {% endfor %}
+              </select>
+
+
             </p>
 
             <p id="workAmountRow">
@@ -760,8 +803,11 @@
                   </td>
 
                   <td style="text-align:right; white-space:nowrap;">
-                    <a class="mini-btn" href="?mode=charge&plate={{ t.plate }}">Pagar</a>
+                    <a class="mini-btn" href="?mode=charge&ticket_id={{ t.id }}&plate={{ t.plate }}">Pagar</a>
                   </td>
+
+
+
                 </tr>
               {% endfor %}
             </table>
@@ -838,7 +884,8 @@
     btn.classList.toggle("submit-btn", enabled);
   }
   function show(el, yes){ if (el) el.style.display = yes ? "" : "none"; }
-  function normalizePlate(val){ return (val || "").trim().toUpperCase(); }
+  function normalizePlate(val){return (val || "").trim().toUpperCase().replace(/\s+/g,'').replace(/-/g,'');}
+
   function isAlnumPlate(val){
     const p = normalizePlate(val);
     return /^[A-Z0-9]+$/.test(p) && p.length >= 3 && p.length <= 12;
@@ -856,6 +903,8 @@
     const gate = document.getElementById("checkinGateBlock");
     const plateErrorFormat = document.getElementById("plateErrorIn");
     const plateErrorActive = document.getElementById("plateErrorActive");
+    const plateErrorMonthly = document.getElementById("plateErrorMonthly");
+
     if (plateInput) {
       plateInput.addEventListener('input', () => {
         const up = normalizePlate(plateInput.value);
@@ -886,14 +935,41 @@
             const data = await response.json();
 
             if (data && data.success) {
-                show(plateErrorActive, true);
-                show(gate, false);
-                setBtnState(submitBtn, false);
-            } else {
+                const plan = String(data.plan || "").toLowerCase();
+                const blocked = String(data.blocked || "").toLowerCase();
+
+                // ❌ Si backend dice que es MENSUAL -> bloquear (igual que activo)
+                if (blocked === "monthly") {
+                  show(plateErrorMonthly, true);
+                  show(plateErrorActive, false);
+                  show(gate, false);
+                  setBtnState(submitBtn, false);
+                  return;
+                }
+
+                // ✅ Si es "Pendiente", PERMITIMOS volver a registrar (tu regla)
+                if (plan === "pendiente") {
+                  show(plateErrorMonthly, false);
+                  show(plateErrorActive, false);
+                  show(gate, true);
+                  checkFullFormValidity();
+                } else {
+                  // ❌ Si NO es pendiente, asumimos que es ACTIVE y bloqueamos
+                  show(plateErrorMonthly, false);
+                  show(plateErrorActive, true);
+                  show(gate, false);
+                  setBtnState(submitBtn, false);
+                }
+
+              } else {
+                // no existe ticket -> permitir registrar
+                show(plateErrorMonthly, false);
                 show(plateErrorActive, false);
                 show(gate, true);
                 checkFullFormValidity();
-            }
+              }
+
+
 
         } catch (err) {
             console.error("Error verificando placa", err);
@@ -921,8 +997,10 @@
         plateInput.addEventListener('input', () => {
             show(gate, false);
             show(plateErrorActive, false);
+            show(plateErrorMonthly, false);
             show(plateErrorFormat, false);
             setBtnState(submitBtn, false);
+
         });
     }
 
@@ -962,6 +1040,8 @@
     const priceDisplay = document.getElementById('priceDisplay');
     const plateError = document.getElementById("plateErrorClose");
     const plateErrorFmt = document.getElementById("plateErrorCloseFormat");
+    const plateErrorMonthly = document.getElementById("plateErrorCloseMonthly");
+
     const paymentGateBlock = document.getElementById("paymentGateBlock");
 
     const method = form.querySelector('#id_method');
@@ -969,6 +1049,9 @@
     const companyInput = form.querySelector('#id_company');
     const invoice = form.querySelector('#id_invoice_required');
     const idInput = form.querySelector('#id_id_number');
+    const nameSearchInput = document.getElementById("customerNameSearch");
+    const suggestionsBox = document.getElementById("customerSuggestions");
+
     const nameInput = form.querySelector('#id_full_name');
     const emailInput = form.querySelector('#id_email');
 
@@ -988,16 +1071,80 @@
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+    // ==========================================================
+    // ✅ Estado del ticket reportado por el backend en "quote"
+    // ==========================================================
     let plateExists = false;
     let isPendingTicket = false;
-    if (plateInput) {
-        plateInput.addEventListener('input', () => {
-          const up = normalizePlate(plateInput.value);
-          if (plateInput.value !== up) plateInput.value = up;
-        });
-      }
 
-    // Guardamos opciones originales del select de método para poder restaurar
+    // ✅ info del ticket desde backend
+    let ticketStatus = "";          // "PENDING", "ACTIVE", "ASSIGNED"
+    let ticketHasCompany = false;   // info
+    let ticketCompanyCredit = false;
+
+    // ✅ SOLO BLOQUEA SI ES ASSIGNED
+    let ticketIsAssigned = false;
+
+    // ==============================
+    // ✅ Servicio precargado desde el ticket (si ya existe)
+    // ==============================
+    let ticketHasService = false;
+    let ticketWorkTypeValue = "";
+    let ticketWorkAmount = 0;
+
+    function prefillServiceFromTicket(data){
+      const wt = (data?.work_type_value || "").toString().trim();
+      const wa = parseInt((data?.work_amount_cop ?? 0), 10) || 0;
+
+      ticketHasService = !!wt;
+      ticketWorkTypeValue = wt;
+      ticketWorkAmount = wa;
+
+      // ✅ CLAVE: NO usar disabled, porque NO se envía en POST
+      if (ticketHasService) {
+        if (workType) {
+          workType.value = ticketWorkTypeValue;
+          workType.disabled = false;
+        }
+        if (workAmount) {
+          workAmount.value = String(ticketWorkAmount);
+          workAmount.readOnly = true;   // ✅ sí se envía
+          workAmount.disabled = false;  // ✅ asegurar
+        }
+      } else {
+        // si no hay servicio precargado, dejar editable normal
+        if (workAmount) {
+          workAmount.readOnly = false;
+          workAmount.disabled = false;
+        }
+      }
+    }
+
+    // ✅ Detecta si vienes desde el sidebar "Pagos pendientes" (trae ticket_id)
+    function cameFromPendingShortcut(){
+      try {
+        const url = new URL(window.location.href);
+        const tid = (url.searchParams.get('ticket_id') || '').trim();
+        const hiddenTid = (form.querySelector('#id_ticket_id')?.value || '').trim();
+        return !!(tid || hiddenTid);
+      } catch (e) {
+        const hiddenTid = (form.querySelector('#id_ticket_id')?.value || '').trim();
+        return !!hiddenTid;
+      }
+    }
+
+    function isNoneWorkTypeSelected(){
+      const opt = workType?.selectedOptions?.[0];
+      return !!(opt && opt.dataset && opt.dataset.none === "1");
+    }
+
+    if (plateInput) {
+      plateInput.addEventListener('input', () => {
+        const up = normalizePlate(plateInput.value);
+        if (plateInput.value !== up) plateInput.value = up;
+      });
+    }
+
     const originalMethodOptions = (method && method.options)
       ? Array.from(method.options).map(o => ({value: o.value, text: o.text}))
       : [];
@@ -1016,7 +1163,6 @@
         }
       });
 
-      // intenta mantener selección si sigue permitida
       const stillAllowed = allowedValues.includes(cur);
       method.value = stillAllowed ? cur : "";
     }
@@ -1051,14 +1197,58 @@
       applyInvoiceCustomerUI();
     }
 
+    // ==========================================================
+    // ✅ SOLO si ASSIGNED => NO permitir factura electrónica por cliente
+    // ==========================================================
+    function applyCompanyInvoiceLock(){
+      if (!ticketIsAssigned) return false;
+
+      show(invoiceRow, false);
+      if (invoice) invoice.value = "";
+
+      show(idRow, false);
+      show(nameRow, false);
+      show(emailRow, false);
+
+      if (idInput) idInput.value = "";
+      if (nameInput) nameInput.value = "";
+      if (emailInput) emailInput.value = "";
+
+      const nitRow = document.getElementById("nitRow");
+      if (nitRow) nitRow.style.display = "none";
+
+      if (nameSearchInput) nameSearchInput.value = "";
+      if (suggestionsBox) {
+        suggestionsBox.innerHTML = "";
+        suggestionsBox.style.display = "none";
+      }
+
+      customerFound = false;
+      verifiedCustomerId = "";
+      clearCustomerFields();
+
+      setHint(
+        "warn",
+        ticketCompanyCredit
+          ? "Ticket ASSIGNED (crédito): debe liquidarse desde Empresas (no factura por cliente aquí)."
+          : "Ticket ASSIGNED: no se factura a cliente desde Operario."
+      );
+      return true;
+    }
+
+    // ==========================================================
     // Reset inicial (sin romper)
+    // ==========================================================
     if (method) method.value = "";
     if (invoice) invoice.value = "";
     if (companyInput) companyInput.value = "";
     if (transferInput) transferInput.value = "";
     if (workType) workType.value = "";
     if (workAmount) workAmount.value = "";
-    if (workAmount) workAmount.disabled = true;
+    if (workAmount) {
+      workAmount.readOnly = false;
+      workAmount.disabled = false;   // ✅ NUNCA disabled aquí
+    }
     show(workAmountRow, false);
 
     show(paymentGateBlock, false);
@@ -1066,9 +1256,97 @@
     show(plateError, false);
     show(plateErrorFmt, false);
     setBtnState(submitBtn, false);
+    show(plateErrorMonthly, false);
 
+    // ==========================================================
+    // Autocomplete por NOMBRE (solo si NO es ASSIGNED)
+    // ==========================================================
+    if (nameSearchInput) {
+      nameSearchInput.addEventListener("input", async function(){
+        if (ticketIsAssigned) {
+          if (suggestionsBox) suggestionsBox.style.display = "none";
+          return;
+        }
+
+        const q = this.value.trim();
+        if (!q || q.length < 2) {
+          if (suggestionsBox) suggestionsBox.style.display = "none";
+          return;
+        }
+
+        try {
+          const response = await fetch(`?mode=lookup_customer&by=name&q=${encodeURIComponent(q)}`);
+          const data = await response.json();
+
+          if (!data || !data.results || !data.results.length) {
+            if (suggestionsBox) suggestionsBox.style.display = "none";
+
+            const nitRow = document.getElementById("nitRow");
+            if (nitRow) nitRow.style.display = "";
+
+            show(nameRow, true);
+            show(emailRow, true);
+
+            if (nameInput && !nameInput.value.trim()) {
+              nameInput.value = q;
+            }
+
+            setHint("warn", "Cliente no encontrado. Ingresa NIT y correo para registrarlo.");
+            return;
+          }
+
+          suggestionsBox.innerHTML = "";
+
+          data.results.forEach(c => {
+            const div = document.createElement("div");
+            div.style.padding = "8px 10px";
+            div.style.cursor = "pointer";
+            div.style.borderBottom = "1px solid var(--border)";
+            div.innerHTML = `<strong>${c.full_name}</strong><br><small>${c.id_number}</small>`;
+            div.onclick = function(){
+              const fullName = (c.full_name || "").trim();
+              const nid = (c.id_number || "").trim();
+              const em = (c.email || "").trim();
+
+              if (nameSearchInput) nameSearchInput.value = fullName;
+
+              if (idInput) idInput.value = nid;
+              if (nameInput) nameInput.value = fullName;
+              if (emailInput) emailInput.value = em;
+
+              const nitRow = document.getElementById("nitRow");
+              if (nitRow) nitRow.style.display = "none";
+
+              if (suggestionsBox) {
+                suggestionsBox.innerHTML = "";
+                suggestionsBox.style.display = "none";
+              }
+
+              customerFound = true;
+              verifiedCustomerId = nid;
+
+              setHint("ok", "Cliente seleccionado ✓");
+              applyInvoiceCustomerUI();
+              setBtnState(submitBtn, basicValid());
+            };
+
+            suggestionsBox.appendChild(div);
+          });
+
+          suggestionsBox.style.display = "block";
+        } catch (err) {
+          if (suggestionsBox) suggestionsBox.style.display = "none";
+        }
+      });
+    }
+
+    // ==========================================================
+    // Validación ID (solo si NO es ASSIGNED)
+    // ==========================================================
     if (idInput) {
       idInput.addEventListener('input', function() {
+        if (ticketIsAssigned) return;
+
         this.value = this.value.replace(/[^0-9]/g, '');
         const cur = (this.value || "").trim();
 
@@ -1085,6 +1363,8 @@
       });
 
       idInput.addEventListener('blur', async function() {
+        if (ticketIsAssigned) return;
+
         const m = method ? (method.value || "") : "";
         const inv = invoice ? (invoice.value || "") : "";
         const val = (this.value || "").trim();
@@ -1101,7 +1381,10 @@
         setHint("", "Buscando cliente...");
 
         try {
-          const response = await fetch(`?mode=lookup_customer&id=${encodeURIComponent(val)}`);
+          const lookupBy = document.querySelector('input[name="lookupBy"]:checked')?.value || "nit";
+          const param = (lookupBy === "name") ? "q" : "id";
+          const byParam = (lookupBy === "name") ? "&by=name" : "";
+          const response = await fetch(`?mode=lookup_customer&${param}=${encodeURIComponent(val)}${byParam}`);
           const data = await response.json();
 
           if (((idInput.value || "").trim()) !== val) return;
@@ -1132,47 +1415,60 @@
       });
     }
 
-    if(emailInput) {
+    if (emailInput) {
       emailInput.addEventListener('input', function() {
         const val = this.value.trim();
         const emailVisible = emailRow && emailRow.style.display !== "none";
         if (!emailVisible) {
           this.classList.remove("input-error");
-          if(emailError) emailError.style.display = "none";
+          if (emailError) emailError.style.display = "none";
           setBtnState(submitBtn, basicValid());
           return;
         }
         if (val.length > 0) {
-          if(!emailRegex.test(val)) {
+          if (!emailRegex.test(val)) {
             this.classList.add("input-error");
-            if(emailError) emailError.style.display = "block";
+            if (emailError) emailError.style.display = "block";
           } else {
             this.classList.remove("input-error");
-            if(emailError) emailError.style.display = "none";
+            if (emailError) emailError.style.display = "none";
           }
         } else {
           this.classList.remove("input-error");
-          if(emailError) emailError.style.display = "none";
+          if (emailError) emailError.style.display = "none";
         }
         setBtnState(submitBtn, basicValid());
       });
     }
 
-    if(nameInput) nameInput.addEventListener('input', () => setBtnState(submitBtn, basicValid()));
+    if (nameInput) nameInput.addEventListener('input', () => setBtnState(submitBtn, basicValid()));
 
     function workUI(){
       if (!workType || !workAmount) return;
-      const wt = (workType.value || "").trim();
-      if (!wt) {
-        workAmount.disabled = true;
-        workAmount.value = "";
+
+      const isNone = isNoneWorkTypeSelected();
+
+      // ✅ SOLO deshabilitar si es NONE.
+      // ✅ Si viene del ticket, se bloquea con readOnly, NO con disabled.
+      if (isNone) {
+        workAmount.value = "0";
+        workAmount.readOnly = true;
+        workAmount.disabled = false;
         show(workAmountRow, false);
         return;
       }
-      const enableAmount = (wt !== "NONE");
-      workAmount.disabled = !enableAmount;
-      if (!enableAmount) workAmount.value = "";
-      show(workAmountRow, enableAmount);
+
+      show(workAmountRow, true);
+
+      if (ticketHasService) {
+        // viene precargado: bloquear edición pero ENVIAR en POST
+        workAmount.readOnly = true;
+        workAmount.disabled = false;
+      } else {
+        // editable normal
+        workAmount.readOnly = false;
+        workAmount.disabled = false;
+      }
     }
 
     if (workType) {
@@ -1182,10 +1478,23 @@
       });
     }
 
+    // ==========================================================
+    // AJAX Quote / existence
+    // ==========================================================
     async function fetchQuoteAndExistence() {
       const plate = normalizePlate(plateInput?.value || "");
+
       plateExists = false;
       isPendingTicket = false;
+
+      ticketStatus = "";
+      ticketHasCompany = false;
+      ticketCompanyCredit = false;
+      ticketIsAssigned = false;
+
+      ticketHasService = false;
+      ticketWorkTypeValue = "";
+      ticketWorkAmount = 0;
 
       show(plateError, false);
       show(plateErrorFmt, false);
@@ -1199,29 +1508,61 @@
       }
 
       try {
-        const response = await fetch(`?mode=quote&plate=${encodeURIComponent(plate)}`, {
-          headers: {'X-Requested-With': 'XMLHttpRequest'}
+        const urlObj = new URL(window.location.href);
+        const ticketId = (urlObj.searchParams.get("ticket_id") || "").trim();
+
+        let qUrl = `?mode=quote&plate=${encodeURIComponent(plate)}`;
+        if (ticketId) qUrl += `&ticket_id=${encodeURIComponent(ticketId)}`;
+
+        const response = await fetch(qUrl, {
+          headers: { "X-Requested-With": "XMLHttpRequest" },
         });
+
         const data = await response.json();
 
         if (data && data.success) {
-          plateExists = true;
+          const blocked = String(data.blocked || "").toLowerCase();
+          if (blocked === "monthly") {
+            plateExists = false;
+            isPendingTicket = false;
 
-          // ✅ detecta PENDIENTE según el backend (plan: "Pendiente")
+            show(paymentGateBlock, false);
+            show(plateError, false);
+            show(plateErrorFmt, false);
+            show(plateErrorMonthly, true);
+
+            if (priceDisplay) priceDisplay.style.display = "none";
+            setBtnState(submitBtn, false);
+            return;
+          }
+
+          plateExists = true;
           isPendingTicket = (String(data.plan || "").toLowerCase() === "pendiente");
 
+          ticketStatus = String(data.ticket_status || "").toUpperCase();
+          ticketHasCompany = !!data.has_company;
+          ticketCompanyCredit = !!data.company_credit;
+
+          ticketIsAssigned = (ticketStatus === "ASSIGNED");
+
+          show(plateErrorMonthly, false);
           show(paymentGateBlock, true);
+
           if (priceDisplay) {
             priceDisplay.textContent = `${data.amount} COP`;
-            priceDisplay.style.display = 'block';
+            priceDisplay.style.display = "block";
           }
+
+          // ✅ Precargar servicio guardado del ticket (si backend lo envía)
+          prefillServiceFromTicket(data);
 
           applyUI();
           workUI();
-
         } else {
           plateExists = false;
           isPendingTicket = false;
+
+          show(plateErrorMonthly, false);
           show(paymentGateBlock, false);
           show(plateError, true);
         }
@@ -1231,6 +1572,7 @@
         show(paymentGateBlock, false);
         show(plateError, true);
       }
+
       setBtnState(submitBtn, basicValid());
     }
 
@@ -1243,9 +1585,16 @@
         plateExists = false;
         isPendingTicket = false;
 
+        ticketStatus = "";
+        ticketHasCompany = false;
+        ticketCompanyCredit = false;
+        ticketIsAssigned = false;
+
         show(plateError, false);
         show(plateErrorFmt, false);
         show(paymentGateBlock, false);
+        show(plateErrorMonthly, false);
+
         if (priceDisplay) priceDisplay.style.display = "none";
         setBtnState(submitBtn, false);
 
@@ -1255,6 +1604,13 @@
     }
 
     function applyInvoiceCustomerUI(){
+      if (ticketIsAssigned) {
+        show(nameRow, false);
+        show(emailRow, false);
+        setHint("", "");
+        return;
+      }
+
       const m = method ? (method.value || "") : "";
       const inv = invoice ? (invoice.value || "") : "";
       const invoiceAllowed = (m === "CASH" || m === "TRANSFER");
@@ -1298,15 +1654,17 @@
       const m = method ? (method.value || "") : "";
       if (!m) return false;
 
-      // ✅ PENDING: solo CASH/TRANSFER (no crédito) y NO pedir servicio/empresa
-      if (isPendingTicket) {
+      const treatAsPending = !!isPendingTicket || cameFromPendingShortcut();
+
+      if (ticketIsAssigned) return false;
+
+      if (treatAsPending) {
         if (!(m === "CASH" || m === "TRANSFER")) return false;
 
         if (m === "TRANSFER") {
           if ((transferInput?.value || "").trim().length === 0) return false;
         }
 
-        // Factura electrónica sigue aplicando
         const inv = invoice ? (invoice.value || "") : "";
         if (!inv) return false;
 
@@ -1315,7 +1673,6 @@
           if (!idVal) return false;
 
           const isValidFound = (customerFound && verifiedCustomerId && idVal === verifiedCustomerId);
-
           if (!isValidFound) {
             if ((nameInput?.value || "").trim().length === 0) return false;
             const mailVal = (emailInput?.value || "").trim();
@@ -1323,10 +1680,15 @@
             if (!emailRegex.test(mailVal)) return false;
           }
         }
+        // ✅ PENDING no exige tocar servicio, solo que exista si viene precargado
+        if (ticketHasService) {
+          const wa = parseInt((workAmount?.value || "").trim(), 10);
+          if (!wa || wa <= 0) return false;
+        }
         return true;
       }
 
-      // ✅ ACTIVE (comportamiento original)
+      // ACTIVE normal
       if (m === "TRANSFER") {
         if ((transferInput?.value || "").trim().length === 0) return false;
       }
@@ -1344,7 +1706,6 @@
           if (!idVal) return false;
 
           const isValidFound = (customerFound && verifiedCustomerId && idVal === verifiedCustomerId);
-
           if (!isValidFound) {
             if ((nameInput?.value || "").trim().length === 0) return false;
             const mailVal = (emailInput?.value || "").trim();
@@ -1354,33 +1715,49 @@
         }
       }
 
+      // Servicio en ACTIVE
       const wt = (workType?.value || "").trim();
       if (!wt) return false;
 
-      if (wt !== "NONE") {
+      const isNone = isNoneWorkTypeSelected();
+      if (!isNone) {
         const val = parseInt((workAmount?.value || "").trim(), 10);
         if (!val || val <= 0) return false;
       }
-
       return true;
     }
 
     function applyUI(){
       const m = method ? (method.value || "") : "";
+      const treatAsPending = !!isPendingTicket || cameFromPendingShortcut();
 
-      // ✅ Si es PENDING: quitar opción crédito y ocultar empresa/servicio
-      if (isPendingTicket) {
+      if (applyCompanyInvoiceLock()) {
+        setBtnState(submitBtn, basicValid());
+        return;
+      }
+
+      if (treatAsPending) {
         rebuildMethodOptions(["CASH","TRANSFER"]);
         const mm = method ? (method.value || "") : "";
 
         show(companyRow, false);
         if (companyInput) companyInput.value = "";
 
-        showServiceFields(false); // no pedir servicio aquí
+        // ✅ ocultar servicio en UI, pero NUNCA disabled si viene precargado
+        showServiceFields(false);
+        if (workAmount) {
+          if (ticketHasService) {
+            workAmount.readOnly = true;
+            workAmount.disabled = false; // ✅ CLAVE
+          } else {
+            workAmount.readOnly = false;
+            workAmount.disabled = false;
+          }
+        }
+        show(workAmountRow, false);
 
         show(transferRow, mm === "TRANSFER");
 
-        // factura electrónica sí aplica para CASH/TRANSFER
         const invoiceAllowed = (mm === "CASH" || mm === "TRANSFER");
         show(invoiceRow, invoiceAllowed);
 
@@ -1416,14 +1793,21 @@
         return;
       }
 
-      // ✅ Si NO es pending: restaurar opciones completas y UI original
+      // ACTIVE: restaurar opciones completas
       rebuildMethodOptions(originalMethodOptions.filter(o => o.value).map(o => o.value));
 
       show(transferRow, m === "TRANSFER");
       show(companyRow, m === "CREDIT");
 
-      // Servicio visible en ACTIVE
       showServiceFields(true);
+
+      // ✅ si venía precargado, bloquear con readOnly, no disabled
+      if (ticketHasService && workAmount) {
+        workAmount.readOnly = true;
+        workAmount.disabled = false;
+      }
+
+      workUI && workUI();
 
       const invoiceAllowed = (m === "CASH" || m === "TRANSFER");
       show(invoiceRow, invoiceAllowed);
@@ -1455,16 +1839,21 @@
           applyInvoiceCustomerUI();
         }
       }
+
       setBtnState(submitBtn, basicValid());
     }
 
     if (method) method.addEventListener("change", () => {
+      if (ticketIsAssigned) { applyUI(); return; }
+
       if (idInput) idInput.value = "";
       invalidateCustomer("");
       applyUI();
     });
 
     if (invoice) invoice.addEventListener("change", () => {
+      if (ticketIsAssigned) { applyUI(); return; }
+
       if (idInput) idInput.value = "";
       invalidateCustomer("");
       applyUI();
@@ -1473,9 +1862,16 @@
     form.addEventListener("input", () => setBtnState(submitBtn, basicValid()));
     form.addEventListener("change", () => setBtnState(submitBtn, basicValid()));
 
+    // ✅ BLINDAJE FINAL: antes de submit, garantizar que se envíe work_amount/work_type
+    form.addEventListener("submit", function(){
+      if (workAmount) workAmount.disabled = false;
+      if (workType) workType.disabled = false;
+    });
+
     applyUI();
     workUI();
   })();
+
 
   /* ==========================
      ✅ Tabs + filtro pendientes
@@ -1520,21 +1916,32 @@
      ✅ si vienes con ?mode=charge&plate=XXX, prellena la placa y dispara blur
      ========================== */
   (function setupPrefillChargePlate(){
-    const form = document.getElementById('closeForm');
-    if (!form) return;
+  const form = document.getElementById('closeForm');
+  if (!form) return;
 
-    const plateInput = form.querySelector('#id_plate');
-    if (!plateInput) return;
+  const plateInput = form.querySelector('#id_plate');
+  const ticketIdInput = form.querySelector('#id_ticket_id'); // ✅ hidden
 
-    const url = new URL(window.location.href);
-    const plate = (url.searchParams.get('plate') || '').trim().toUpperCase();
-    if (!plate) return;
+  const url = new URL(window.location.href);
+  const plate = (url.searchParams.get('plate') || '').trim().toUpperCase();
+  const ticketId = (url.searchParams.get('ticket_id') || '').trim();
 
-    if ((plateInput.value || '').trim().length === 0) {
-      plateInput.value = plate;
-      setTimeout(() => plateInput.dispatchEvent(new Event('blur')), 0);
-    }
-  })();
+  // set hidden ticket_id si viene
+  if (ticketIdInput && ticketId) {
+    ticketIdInput.value = ticketId;
+  }
+
+  // set plate si viene
+  if (plateInput && plate && (plateInput.value || '').trim().length === 0) {
+    plateInput.value = plate;
+  }
+
+  // disparar blur para que cotice
+  if (plateInput && (plate || ticketId)) {
+    setTimeout(() => plateInput.dispatchEvent(new Event('blur')), 0);
+  }
+})();
+
 </script>
 
 {% endblock %}

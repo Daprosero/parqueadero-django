@@ -66,12 +66,15 @@
 
     <!-- Encabezado Negocio -->
     <div class="header text-center">
-        <div class="business-name uppercase">Parqueadero Los Cambulos</div>
-        <div>Nit: 75081166-3</div>
-        <div class="uppercase">Jorge Eliecer Quiceno</div>
-        <div>Correo: parqueaderoloscambulos@gmail.com</div>
-        <div>Cel: 312 277 5300</div>
+        <div class="business-name uppercase">
+            {{ BUSINESS_INFO.name }}
+        </div>
+        <div>Nit: {{ BUSINESS_INFO.nit }}</div>
+        <div class="uppercase">{{ BUSINESS_INFO.owner_name }}</div>
+        <div>Correo: {{ BUSINESS_INFO.email }}</div>
+        <div>Cel: {{ BUSINESS_INFO.phone }}</div>
     </div>
+
 
     <div class="dashed-line"></div>
 
@@ -186,11 +189,24 @@
 
     <div class="dashed-line" style="margin-top: 15px;"></div>
 
-    <!-- VEHÍCULOS ACTIVOS -->
+    <!-- VEHÍCULOS EN PATIO -->
     <div class="row bold" style="justify-content: center; margin-top: 5px;">
         VEHÍCULOS EN PATIO: {{ active_count }}
+    </div> 
+
+    <!-- 🔒 TRACE: agregado desglose de vehículos en patio (tickets + mensuales) -->
+    <!-- Cambio realizado para incluir conteo detallado en cierre de caja -->
+
+    <div class="row">
+        <span>Cliente Regular:</span>
+        <span>{{ active_tickets_count }}</span>
     </div>
 
+    <div class="row">
+        <span>Cliente Mensual:</span>
+        <span>{{ monthly_count }}</span>
+    </div>
+    
     <div class="dashed-line" style="margin-bottom: 20px;"></div>
 
     <div style="text-align:center;">.</div>

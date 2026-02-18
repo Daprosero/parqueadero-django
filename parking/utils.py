@@ -5,6 +5,73 @@ from .models import Ticket, Customer, iter_pricing_segments
 import os
 from datetime import datetime
 from .siigo_client import SiigoClient, SiigoAPIError, SiigoAuthError
+# parking/utils.py
+import re
+from typing import Optional, Tuple
+EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+def normalize_id_number(v: str) -> str:
+    """Normaliza cédula/NIT: quita espacios y deja tal cual si tiene letras, pero si es numérico quita separadores."""
+    s = (v or "").strip()
+    if not s:
+        return ""
+    # Si contiene letras, no lo toques (por si manejas NITs especiales)
+    if any(ch.isalpha() for ch in s):
+        return s
+    # Dejar solo dígitos (900.123-4 -> 9001234)
+    return "".join(ch for ch in s if ch.isdigit())
+
+def is_valid_email(v: str) -> bool:
+    return bool(EMAIL_RE.match((v or "").strip()))
+
+def resolve_or_create_customer(
+    *,
+    id_number: str,
+    full_name: str,
+    email: str,
+    customer_obj: Optional[Customer] = None,
+) -> Tuple[Optional[Customer], Optional[str]]:
+    """
+    Retorna (customer, error_message).
+    - Si customer_obj existe => retorna ese.
+    - Si existe Customer por id_number => retorna ese.
+    - Si no existe => valida y crea uno nuevo.
+    """
+    if customer_obj:
+        return customer_obj, None
+
+    id_number = normalize_id_number(id_number)
+    full_name = (full_name or "").strip()
+    email = (email or "").strip()
+
+    if id_number:
+        c = Customer.objects.filter(id_number=id_number).first()
+        if c:
+            return c, None
+
+    # Si no existe, validar datos mínimos para crear
+    if not id_number:
+        return None, "La cédula/NIT es obligatoria para factura electrónica."
+    if not full_name:
+        return None, "El nombre/razón social es obligatorio si el cliente no existe."
+    if not email or not is_valid_email(email):
+        return None, "El correo es obligatorio y debe ser válido si el cliente no existe."
+
+    c = Customer.objects.create(
+        id_number=id_number,
+        full_name=full_name,
+        email=email,
+        active=True,
+        is_company=False,
+    )
+
+    # Mantener tu regla: no permitir crédito si no es empresa
+    try:
+        force_credit_disabled(c)
+    except Exception:
+        pass
+
+    return c, None
 
 
 
@@ -76,90 +143,194 @@ def _get_friendly_error(error: Exception) -> str:
 
     return f"Error al procesar la factura: {str(error)}"
 
-
-
+###Nuevo##
 def emit_electronic_invoice_preview(
     *,
     id_number: str,
     full_name: str,
     email: str,
-    total_amount_cop: int,
+    items: list,
 ) -> dict:
-    """
-    Emite una factura electrónica a través de Siigo.
-
-    - ✅ Si es EXITOSO: retorna dict con la factura (NO guarda en BD).
-    - ✅ Si FALLA: guarda/actualiza ElectronicInvoiceOutbox (sin duplicar)
-      y retorna {"success": False, ...} (NO lanza excepción).
-    """
+    """Emite una factura electrónica a través de Siigo."""
 
     data = {
         "id_number": (id_number or "").strip(),
         "full_name": (full_name or "").strip(),
         "email": (email or "").strip(),
-        "total_amount_cop": int(total_amount_cop or 0),
     }
 
-    def _save_outbox(msg: str) -> None:
-        """Guardar/actualizar Outbox sin duplicar y sin romper el flujo."""
+    # Normalización mínima de items para:
+    # - usarla en outbox tal cual (plate/price)
+    # - asegurar hash estable (si tu modelo lo calcula)
+    def _normalize_items(raw_items: list) -> list:
+        cleaned = []
+        if not isinstance(raw_items, list):
+            return cleaned
+        for it in raw_items:
+            if not isinstance(it, dict):
+                continue
+            plate = (it.get("plate") or "").strip().upper()
+            try:
+                price = int(it.get("price") or 0)
+            except Exception:
+                price = 0
+            if plate and price > 0:
+                cleaned.append({"plate": plate, "price": price})
+        return cleaned
+
+    def _save_outbox(msg: str, outbox_items: list) -> None:
+        """
+        Guardar/actualizar Outbox SOLO si hay total real > 0.
+        Camino 2 (ideal): guardamos items + items_hash.
+        """
         try:
+            if data.get("total_amount_cop", 0) <= 0:
+                return  # 🔒 NUNCA guardar si el total es 0
+
             from .models import ElectronicInvoiceOutbox
 
-            obj, created = ElectronicInvoiceOutbox.objects.get_or_create(
+            outbox_items = _normalize_items(outbox_items)
+            if not outbox_items:
+                return  # sin items válidos, no guardamos (tu modelo lo exige)
+
+            # Calcula hash estable usando el método del modelo
+            tmp = ElectronicInvoiceOutbox(
                 id_number=data["id_number"],
                 full_name=data["full_name"],
                 email=data["email"],
-                total_amount_cop=data["total_amount_cop"],
+                items=outbox_items,
+                status="PENDING",
+            )
+            items_hash = tmp._compute_items_hash()
+
+            # Upsert por id_number + email + items_hash (evita duplicados idénticos)
+            ElectronicInvoiceOutbox.objects.update_or_create(
+                id_number=data["id_number"],
+                email=data["email"],
+                items_hash=items_hash,
                 defaults={
+                    "full_name": data["full_name"],
+                    "items": outbox_items,
                     "status": "PENDING",
                     "last_error": (msg or "")[:2000],
                     "last_attempt_at": timezone.now(),
+                    # total_amount_cop lo recalcula el clean() desde items
                 },
             )
-            if not created:
-                obj.status = "PENDING"
-                obj.last_error = (msg or "")[:2000]
-                obj.last_attempt_at = timezone.now()
-                obj.save(update_fields=["status", "last_error", "last_attempt_at", "updated_at"])
+
         except Exception:
-            # Nunca rompas el flujo por fallas al persistir outbox
+            # 🔒 Nunca romper flujo por error en Outbox
             pass
 
     # =========================
-    # Validaciones (ANTES: raise)
-    # AHORA: guardar outbox + return success=False
+    # VALIDACIONES BÁSICAS
     # =========================
+
     if not data["id_number"]:
-        msg = "Factura electrónica requiere NIT o cédula"
-        _save_outbox(msg)
-        return {"success": False, "error": msg, "code": "MISSING_ID_NUMBER", **data}
+        return {
+            "success": False,
+            "error": "Factura electrónica requiere NIT o cédula",
+            "code": "MISSING_ID_NUMBER",
+            **data,
+        }
 
     if not data["full_name"]:
-        msg = "Factura electrónica requiere nombre o razón social"
-        _save_outbox(msg)
-        return {"success": False, "error": msg, "code": "MISSING_FULL_NAME", **data}
+        return {
+            "success": False,
+            "error": "Factura electrónica requiere nombre o razón social",
+            "code": "MISSING_FULL_NAME",
+            **data,
+        }
 
     if not data["email"]:
-        msg = "Factura electrónica requiere correo electrónico"
-        _save_outbox(msg)
-        return {"success": False, "error": msg, "code": "MISSING_EMAIL", **data}
+        return {
+            "success": False,
+            "error": "Factura electrónica requiere correo electrónico",
+            "code": "MISSING_EMAIL",
+            **data,
+        }
+
+    if not isinstance(items, list) or not items:
+        return {
+            "success": False,
+            "error": "Factura electrónica requiere al menos un ítem",
+            "code": "MISSING_ITEMS",
+            **data,
+        }
+
+    # =========================
+    # CONSTRUIR ITEMS + TOTAL
+    # =========================
+
+    tax_config = [{"id": SIIGO_CONFIG["tax_id"]}] if SIIGO_CONFIG.get("tax_id") else []
+    siigo_items = []
+    total = 0
+
+    for i, item in enumerate(items, 1):
+        plate = (item.get("plate") or "").strip() if isinstance(item, dict) else ""
+        if not plate:
+            return {
+                "success": False,
+                "error": f"Item {i}: falta 'plate'.",
+                "code": "MISSING_ITEM_PLATE",
+                "item_index": i,
+                **data,
+            }
+
+        try:
+            price = int(item.get("price")) if isinstance(item, dict) else 0
+        except Exception:
+            price = 0
+
+        if price <= 0:
+            return {
+                "success": False,
+                "error": f"Item {i}: 'price' debe ser mayor a 0.",
+                "code": "INVALID_ITEM_PRICE",
+                "item_index": i,
+                **data,
+            }
+
+        plate_u = plate.strip().upper()
+
+        siigo_items.append(
+            {
+                "code": SIIGO_CONFIG["product_code"],
+                "description": f"PARQUEADERO {plate_u}",
+                "quantity": 1,
+                "price": price,
+                "discount": 0,
+                "taxes": tax_config,
+            }
+        )
+
+        total += price
+
+    data["total_amount_cop"] = int(total)
 
     if data["total_amount_cop"] <= 0:
-        msg = "Monto total inválido para facturación"
-        _save_outbox(msg)
-        return {"success": False, "error": msg, "code": "INVALID_TOTAL", **data}
+        return {
+            "success": False,
+            "error": "Monto total inválido para facturación",
+            "code": "INVALID_TOTAL",
+            **data,
+        }
 
-    # Config Siigo (ANTES podía lanzar ValueError)
+    # =========================
+    # VALIDAR CONFIG
+    # =========================
+
     try:
         _validate_config()
     except Exception as e:
         msg = _get_friendly_error(e)
-        _save_outbox(msg)
+        _save_outbox(msg, items)
         return {"success": False, "error": msg, "code": "SIIGO_NOT_CONFIGURED", **data}
 
     # =========================
-    # Siigo
+    # ENVIAR A SIIGO
     # =========================
+
     try:
         client = SiigoClient(
             username=SIIGO_USERNAME,
@@ -177,27 +348,18 @@ def emit_electronic_invoice_preview(
                 "branch_office": 0,
             },
             "seller": SIIGO_CONFIG["seller_id"],
-            "items": [{
-                "code": SIIGO_CONFIG["product_code"],
-                "description": f"Servicio - {data['full_name']}",
-                "quantity": 1,
-                "price": data["total_amount_cop"],
-                "discount": 0,
-                "taxes": (
-                    [{"id": SIIGO_CONFIG["tax_id"]}]
-                    if SIIGO_CONFIG.get("tax_id") else []
-                ),
-            }],
-            "payments": [{
-                "id": SIIGO_CONFIG["payment_type_id"],
-                "value": data["total_amount_cop"],
-                "due_date": today,
-            }],
+            "items": siigo_items,
+            "payments": [
+                {
+                    "id": SIIGO_CONFIG["payment_type_id"],
+                    "value": total,
+                    "due_date": today,
+                }
+            ],
         }
 
         result = client.create_invoice(invoice_data)
 
-        # ✅ éxito: NO guardamos outbox
         return {
             "success": True,
             "id": result.get("id"),
@@ -209,14 +371,16 @@ def emit_electronic_invoice_preview(
 
     except (SiigoAuthError, SiigoAPIError) as e:
         msg = _get_friendly_error(e)
-        _save_outbox(msg)
+        _save_outbox(msg, items)
         return {"success": False, "error": msg, "code": "SIIGO_API_ERROR", **data}
 
     except Exception as e:
         msg = _get_friendly_error(e)
-        _save_outbox(msg)
+        _save_outbox(msg, items)
         return {"success": False, "error": msg, "code": "UNEXPECTED_ERROR", **data}
 
+
+    
 
 def fmt_cop(n: int) -> str:
     try:

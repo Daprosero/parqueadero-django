@@ -23,7 +23,7 @@ from django.conf import settings
 from datetime import timedelta
 import traceback
 from django.db.models.functions import TruncDate
-
+from django.db.models import Max
 from .forms import (
     ClosePaymentForm,
     CompanySettleForm,  # ✅ NUEVO
@@ -50,6 +50,10 @@ from .models import (
     iter_pricing_segments,
     MonthlyPlate,
     ElectronicInvoiceOutbox,
+    WorkType,
+    ActiveVehiclesReport,
+    MonthlyReceipt,
+    CompanyReceiptNumber,
 )
 from .utils import (
     fmt_cop,
@@ -60,9 +64,21 @@ from .utils import (
     force_credit_disabled,
     estimate_amount_cop,
     emit_electronic_invoice_preview,
+    resolve_or_create_customer, 
+    normalize_id_number,
 )
 
 
+##Nuevo##
+def _yard_counts():
+    """
+    Conteo de vehículos en patio.
+    - Tickets ACTIVE: vehículos con registro de ingreso (no han salido)
+    - MonthlyPlate: clientes mensuales (sin entrada/salida en BD), se suman como 'en patio'
+    """
+    active_tickets = Ticket.objects.filter(status="ACTIVE").count()
+    monthly_in_yard = MonthlyPlate.objects.count()
+    return active_tickets, monthly_in_yard, (active_tickets + monthly_in_yard)
 
 def home(request):
     return redirect("parking:post_login_redirect")
@@ -145,7 +161,6 @@ def ticket_delete_active(request, ticket_id: int):
 # =========================
 # Editar servicio (PAID / PENDING / ASSIGNED)  ✅ SOLO ADMIN
 # =========================
-
 @staff_member_required(login_url="parking:login")
 def ticket_edit_paid(request, ticket_id: int):
     ticket = get_object_or_404(Ticket, id=ticket_id)
@@ -156,58 +171,71 @@ def ticket_edit_paid(request, ticket_id: int):
         messages.error(request, "Solo puedes editar servicio en tickets PAGADOS, PENDIENTES o ASIGNADOS.")
         return redirect(next_url or "parking:gestion")
 
-    is_admin = request.user.is_staff or request.user.is_superuser
-    if not is_admin:
+    # (staff_member_required ya filtra, pero lo dejo por compatibilidad con tu flujo)
+    if not (request.user.is_staff or request.user.is_superuser):
         messages.error(request, "No autorizado.")
         return redirect(next_url or "parking:operator_panel")
 
     if request.method == "POST":
         form = EditPaidServiceForm(request.POST)
         if form.is_valid():
-            new_type = (form.cleaned_data.get("service_type") or "NONE").strip()
-            new_type_u = new_type.upper()
+            wt = form.cleaned_data.get("service_type")  # WorkType o None
             new_amt = int(form.cleaned_data.get("service_amount_cop") or 0)
 
-            if new_type_u == "NONE":
-                new_type = "NONE"
+            # NONE => 0 (robusto)
+            wt_code = ((getattr(wt, "code", "") or "").strip().upper() if wt else "NONE")
+            if wt is None or wt_code in ("", "NONE"):
+                wt = None
                 new_amt = 0
 
-            # ✅ Actualiza “servicio principal” en work_*
-            ticket.work_type = new_type
-            ticket.work_amount_cop = new_amt
+            with transaction.atomic():
+                # Bloquea fila para evitar condiciones raras si se edita en paralelo
+                ticket = Ticket.objects.select_for_update().get(id=ticket.id)
 
-            # Legacy off
-            ticket.service_type = "NONE"
-            ticket.service_amount_cop = 0
+                # 1) Congelar base actual (parqueadero/taller) desde el total guardado
+                total_old = int(ticket.total_amount_cop or 0)
+                old_extras = int(ticket.work_amount_cop or 0) + int(ticket.service_amount_cop or 0)
+                base_old = max(0, total_old - old_extras)
 
-            end_time = ticket.check_out or timezone.now()
+                # 2) Aplicar nuevo servicio en work_* (tu estrategia nueva)
+                #    Usa tu setter: acepta WorkType o str
+                ticket.work_type = wt if wt else "NONE"
+                ticket.work_amount_cop = new_amt
 
-            # ✅ Recalcula con la nueva lógica por tramos
-            ticket.total_amount_cop = int(estimate_amount_cop(ticket, now=end_time) or 0)
+                #    Apaga legacy (para que nada "sume dos veces")
+                ticket.service_type = "NONE"
+                ticket.service_amount_cop = 0
 
-            ticket.save(update_fields=[
-                "work_type", "work_amount_cop",
-                "service_type", "service_amount_cop",
-                "total_amount_cop"
-            ])
+                # 3) Re-armar total = base congelada + extras nuevos
+                new_extras = int(ticket.work_amount_cop or 0) + int(ticket.service_amount_cop or 0)
+                ticket.total_amount_cop = int(base_old + new_extras)
 
-            payment_obj = None
-            if hasattr(ticket, "payment") and ticket.payment:
-                ticket.payment.amount_cop = ticket.total_amount_cop
-                ticket.payment.save(update_fields=["amount_cop"])
-                payment_obj = ticket.payment
-            else:
-                payment_obj, _ = Payment.objects.get_or_create(
-                    ticket=ticket,
-                    defaults={
-                        "method": "CASH" if ticket.status == "PAID" else "CREDIT",
-                        "status": "PAID" if ticket.status == "PAID" else "PENDING",
-                        "amount_cop": ticket.total_amount_cop,
-                    }
-                )
-                if int(payment_obj.amount_cop or 0) != int(ticket.total_amount_cop or 0):
-                    payment_obj.amount_cop = ticket.total_amount_cop
-                    payment_obj.save(update_fields=["amount_cop"])
+                # Guardar (incluye tus campos FK/text por el setter)
+                ticket.save(update_fields=[
+                    "work_type_fk", "work_type_text",
+                    "work_amount_cop",
+                    "service_type", "service_amount_cop",
+                    "total_amount_cop",
+                ])
+
+                # 4) Sync Payment para que el recibo use el total correcto
+                if getattr(ticket, "payment", None):
+                    payment_obj = ticket.payment
+                    if int(payment_obj.amount_cop or 0) != int(ticket.total_amount_cop or 0):
+                        payment_obj.amount_cop = ticket.total_amount_cop
+                        payment_obj.save(update_fields=["amount_cop"])
+                else:
+                    payment_obj, _ = Payment.objects.get_or_create(
+                        ticket=ticket,
+                        defaults={
+                            "method": "CASH" if ticket.status == "PAID" else "CREDIT",
+                            "status": "PAID" if ticket.status == "PAID" else "PENDING",
+                            "amount_cop": ticket.total_amount_cop,
+                        }
+                    )
+                    if int(payment_obj.amount_cop or 0) != int(ticket.total_amount_cop or 0):
+                        payment_obj.amount_cop = ticket.total_amount_cop
+                        payment_obj.save(update_fields=["amount_cop"])
 
             messages.success(request, "Servicio actualizado. Puedes reimprimir el recibo.")
 
@@ -216,10 +244,16 @@ def ticket_edit_paid(request, ticket_id: int):
                 receipt_url += f"?next={next_url}"
             return redirect(receipt_url)
 
+        messages.error(request, "Revisa los campos marcados.")
+
     else:
-        stxt = (ticket.work_type or "NONE").strip() or "NONE"
+        # Inicial del form:
+        # - muestra el servicio actual desde work_type (tu compatibilidad devuelve string code)
+        stxt = (ticket.work_type or "NONE").strip().upper() or "NONE"
         samt = int(ticket.work_amount_cop or 0)
-        form = EditPaidServiceForm(initial={"service_type": stxt, "service_amount_cop": samt})
+
+        wt_obj = WorkType.objects.filter(code__iexact=stxt, active=True).first()
+        form = EditPaidServiceForm(initial={"service_type": wt_obj, "service_amount_cop": samt})
 
     return render(request, "parking/ticket_edit_paid.html", {
         "ticket": ticket,
@@ -227,6 +261,7 @@ def ticket_edit_paid(request, ticket_id: int):
         "next_url": next_url,
         "back_url": next_url,
     })
+
 
 
 # =========================
@@ -439,7 +474,7 @@ def closure_recalc(request, closure_id: int):
 
     return redirect(f"{reverse('parking:closure_edit_detail', kwargs={'closure_id': closure.id})}?from_recalc=1")
 
-
+#####Cambio####
 @staff_member_required
 def reprint_closure(request, closure_id):
     closure = get_object_or_404(Closure, id=closure_id)
@@ -452,6 +487,8 @@ def reprint_closure(request, closure_id):
     total_transfer = 0
     total_credit = 0
     total_pending = 0
+    active_tickets_count, monthly_count, active_count = _yard_counts()
+
 
     for t in tickets_list:
         amt = int(t.total_amount_cop or 0)
@@ -494,7 +531,9 @@ def reprint_closure(request, closure_id):
     context = {
         "closure": closure,
         "tickets": tickets_list,
-        "active_count": 0,
+        "active_tickets_count": active_tickets_count,
+        "monthly_count": monthly_count,
+        "active_count": active_count,
         "total_parking": fmt_cop(total_parking),
         "total_service": fmt_cop(total_service),
         "total_general": fmt_cop(total_general),
@@ -517,51 +556,151 @@ def operator_panel(request):
     is_admin = bool(request.user.is_staff or request.user.is_superuser)
 
     # AJAX lookup customer
+    # AJAX lookup customer (NIT o Nombre)
     if mode == "lookup_customer":
-        id_val = request.GET.get("id", "").strip()
-        customer = Customer.objects.filter(id_number=id_val).first()
-        if customer:
-            return JsonResponse({
-                "found": True,
-                "full_name": customer.full_name,
-                "email": customer.email,
-                "is_company": customer.is_company,
-                "credit_enabled": getattr(customer, "credit_enabled", False),
-            })
-        return JsonResponse({"found": False})
+        by = (request.GET.get("by") or "nit").strip().lower()   # nit | name
+        q  = (request.GET.get("q")  or "").strip()
 
-    # =========================
+        # compatibilidad con tu JS viejo (?id=...)
+        if not q:
+            q = (request.GET.get("id") or "").strip()
+            by = "nit"
+
+        if not q:
+            return JsonResponse({"found": False, "mode": "single", "results": []})
+
+        # 1) Buscar por NIT/CC exacto (con normalización)
+        if by in ("nit", "id", "id_number"):
+            q_raw = q
+            q_norm = normalize_id_number(q)
+
+            customer = (
+                Customer.objects.filter(id_number=q_raw).first()
+                or Customer.objects.filter(id_number=q_norm).first()
+            )
+            if customer:
+                return JsonResponse({
+                    "found": True,
+                    "mode": "single",
+                    "full_name": customer.full_name,
+                    "email": customer.email,
+                    "id_number": customer.id_number,
+                    "is_company": customer.is_company,
+                    "credit_enabled": getattr(customer, "credit_enabled", False),
+                })
+            return JsonResponse({"found": False, "mode": "single"})
+
+        # 2) Buscar por nombre (lista de sugerencias)
+        qs = (
+            Customer.objects.filter(full_name__icontains=q, active=True)
+            .order_by("full_name")[:10]
+        )
+        results = [{
+            "id_number": c.id_number,
+            "full_name": c.full_name,
+            "email": c.email,
+            "is_company": c.is_company,
+            "credit_enabled": getattr(c, "credit_enabled", False),
+        } for c in qs]
+
+        return JsonResponse({
+            "found": len(results) > 0,
+            "mode": "list",
+            "results": results
+        })
+
     # AJAX: quote (estimación)
     # - ACTIVE: usa estimate_amount_cop() (cobro por tramos)
     # - PENDING: devuelve el total ya congelado
+    # - ✅ NUEVO: si viene ticket_id, usa ESE ticket (evita ambigüedad por placa)
     # =========================
     if mode == "quote" and request.headers.get("x-requested-with") == "XMLHttpRequest":
-        plate = request.GET.get("plate", "").strip().upper()
+        plate = (request.GET.get("plate", "") or "").strip().upper().replace(" ", "").replace("-", "")
+        ticket_id = (request.GET.get("ticket_id") or "").strip()
 
-        # ✅ AJUSTE: ya NO filtramos por created_by
-        ticket = (
-            Ticket.objects.filter(plate__iexact=plate, status="ACTIVE")
-            .select_related("vehicle_type")
-            .order_by("-check_in")
-            .first()
-        )
+        # ✅ BLOQUEO: placa mensual (para impedir check-in desde operario)
+        if plate and MonthlyPlate.objects.filter(plate__iexact=plate).exists():
+            return JsonResponse({
+                "success": True,
+                "amount": fmt_cop(0),
+                "units": 0,
+                "plan": "Mensual",
+                "blocked": "monthly",
+                # flags consistentes para el front
+                "ticket_status": "",
+                "has_company": False,
+                "company_name": "",
+                "company_credit": False,
+                "block_invoice": False,
+                "work_type_value": "",
+                "work_amount_cop": 0,
+            })
 
-        # si no hay ACTIVE, intentamos PENDING (sin cierre)
-        if not ticket:
+        # ✅ NUEVO: si viene ticket_id, resolvemos por ID (sin cierre)
+        ticket = None
+        if ticket_id.isdigit():
             ticket = (
-                Ticket.objects.filter(
-                    plate__iexact=plate,
-                    status="PENDING",
-                    closure__isnull=True
-                )
-                .select_related("vehicle_type")
+                Ticket.objects.filter(id=int(ticket_id), closure__isnull=True)
+                .select_related("vehicle_type", "company", "payment", "work_type_fk")
+                .first()
+            )
+            if not ticket:
+                return JsonResponse({"success": False, "message": "Ticket no encontrado"})
+            # seguridad: si mandan plate también, debe coincidir
+            if plate and (ticket.plate or "").strip().upper().replace(" ", "").replace("-", "") != plate:
+                return JsonResponse({"success": False, "message": "Ticket/placa no coinciden"})
+
+        # ✅ Si no hay ticket por ID, usamos lógica antigua por PLACA
+        if not ticket:
+            # primero ACTIVE
+            ticket = (
+                Ticket.objects.filter(plate__iexact=plate, status="ACTIVE")
+                .select_related("vehicle_type", "company", "payment", "work_type_fk")
                 .order_by("-check_in")
                 .first()
             )
 
+            # si no hay ACTIVE, intentamos PENDING (sin cierre)
             if not ticket:
-                return JsonResponse({"success": False, "message": "Placa no encontrada"})
+                ticket = (
+                    Ticket.objects.filter(
+                        plate__iexact=plate,
+                        status="PENDING",
+                        closure__isnull=True
+                    )
+                    .select_related("vehicle_type", "company", "payment", "work_type_fk")
+                    .order_by("-check_in")
+                    .first()
+                )
 
+                if not ticket:
+                    return JsonResponse({"success": False, "message": "Placa no encontrada"})
+
+        # =========================
+        # ✅ FLAGS IMPORTANTES PARA EL FRONT
+        # =========================
+        has_company = bool(getattr(ticket, "company_id", None))
+        company_obj = getattr(ticket, "company", None)
+        company_name = (getattr(company_obj, "full_name", "") or "").strip() if company_obj else ""
+        company_credit = bool(getattr(company_obj, "credit_enabled", False)) if company_obj else False
+
+        ticket_status = (getattr(ticket, "status", "") or "").upper()
+
+        # 🔒 SOLO bloquear factura por cliente si está ASSIGNED (crédito)
+        # PENDING sí puede pagarse en operario (y puede tener FE por cliente si así lo decides)
+        block_invoice = (ticket_status == "ASSIGNED") or (has_company and company_credit)
+
+        # ✅ servicio para precargar en el front (si existe)
+        work_type_value = ""
+        try:
+            # si usas FK: work_type_fk_id (pk)
+            work_type_value = str(getattr(ticket, "work_type_fk_id", "") or "")
+        except Exception:
+            work_type_value = ""
+        work_amount_cop = int(getattr(ticket, "work_amount_cop", 0) or 0)
+
+        # ✅ Si el ticket es PENDING: devolver total congelado
+        if ticket_status == "PENDING":
             total = int(getattr(ticket, "total_amount_cop", 0) or 0)
             if total <= 0 and getattr(ticket, "payment", None):
                 try:
@@ -573,14 +712,24 @@ def operator_panel(request):
                 "success": True,
                 "amount": fmt_cop(total),
                 "units": 1,
-                "plan": "Pendiente"
+                "plan": "Pendiente",
+
+                # ✅ flags para el front
+                "ticket_status": ticket_status,
+                "has_company": has_company,
+                "company_name": company_name,
+                "company_credit": company_credit,
+                "block_invoice": block_invoice,
+
+                # ✅ servicio precargable
+                "work_type_value": work_type_value,
+                "work_amount_cop": work_amount_cop,
             })
 
         # ✅ ACTIVE: estimación real con tramos
         now = timezone.now()
         estimated_amount = int(estimate_amount_cop(ticket, now=now) or 0)
 
-        # unidades “informativas” (no afecta cálculo)
         night_units = 0
         hour_units = 0
         for seg_start, seg_end, bu, _ in iter_pricing_segments(ticket.check_in, now):
@@ -609,8 +758,20 @@ def operator_panel(request):
             "success": True,
             "amount": fmt_cop(estimated_amount),
             "units": units,
-            "plan": plan_name
+            "plan": plan_name,
+
+            # ✅ flags para el front
+            "ticket_status": ticket_status,
+            "has_company": has_company,
+            "company_name": company_name,
+            "company_credit": company_credit,
+            "block_invoice": block_invoice,
+
+            # ✅ servicio precargable
+            "work_type_value": work_type_value,
+            "work_amount_cop": work_amount_cop,
         })
+
 
     # modos permitidos
     if mode not in ("menu", "checkin", "charge", "inspect", "open", "pending"):
@@ -636,11 +797,26 @@ def operator_panel(request):
     inspect_form = InspectForm()
 
     # precargar placa en charge
+    # precargar en charge (plate y/o ticket_id)
     plate_qs = (request.GET.get("plate") or "").strip().upper()
-    if mode == "charge" and plate_qs:
-        close_form = ClosePaymentForm(initial={"plate": plate_qs})
-    else:
-        close_form = ClosePaymentForm()
+    ticket_id_qs = (request.GET.get("ticket_id") or "").strip()
+
+    initial_close = {}
+
+    if ticket_id_qs.isdigit():
+        initial_close["ticket_id"] = int(ticket_id_qs)
+
+        # si no viene plate, lo sacamos del ticket para autocompletar
+        if not plate_qs:
+            t0 = Ticket.objects.filter(id=int(ticket_id_qs)).only("plate").first()
+            if t0:
+                plate_qs = (t0.plate or "").strip().upper()
+
+    if plate_qs:
+        initial_close["plate"] = plate_qs
+
+    close_form = ClosePaymentForm(initial=initial_close) if (mode == "charge" and initial_close) else ClosePaymentForm()
+
 
     # CHECKIN
     if request.method == "POST" and mode == "checkin":
@@ -654,224 +830,277 @@ def operator_panel(request):
             messages.success(request, f"Ingreso registrado: {ticket.plate}")
             return redirect(f"{reverse('parking:operator_panel')}?mode=menu")
 
-    # CHARGE
+    # CHARGE############
     if request.method == "POST" and mode == "charge":
         close_form = ClosePaymentForm(request.POST)
         if close_form.is_valid():
-            plate = close_form.cleaned_data["plate"].strip().upper()
+
+            plate = (close_form.cleaned_data["plate"] or "").strip().upper().replace(" ", "").replace("-", "")
+
+            # =========================
+            # 🔒 BLOQUEO: NO permitir pagar/salir con placas mensuales
+            # =========================
+            if plate and MonthlyPlate.objects.filter(plate__iexact=plate).exists():
+                messages.error(
+                    request,
+                    "Esa placa es de cliente MENSUAL. No se procesa salida/pago por Operario."
+                )
+                return redirect(f"{reverse('parking:operator_panel')}?mode=charge")
+
             method = close_form.cleaned_data["method"]
             transfer_ref = (close_form.cleaned_data.get("transfer_ref") or "").strip()
 
-            # pueden venir del form, pero para PENDING NO se usan
+            # pueden venir del form
             company = close_form.cleaned_data.get("company")
             work_type = (close_form.cleaned_data.get("work_type") or "NONE").strip()
             work_amount_cop = int(close_form.cleaned_data.get("work_amount_cop") or 0)
 
             invoice_required = (close_form.cleaned_data.get("invoice_required") == "YES")
-            id_number = (close_form.cleaned_data.get("id_number") or "").strip()
+            id_number = normalize_id_number(close_form.cleaned_data.get("id_number") or "")
             full_name = (close_form.cleaned_data.get("full_name") or "").strip()
             email = (close_form.cleaned_data.get("email") or "").strip()
             customer_obj = close_form.cleaned_data.get("_customer_obj")
 
-            # ✅ AJUSTE: primero ACTIVE (sin created_by)
-            ticket = Ticket.objects.filter(
-                plate__iexact=plate, status="ACTIVE"
-            ).select_related("vehicle_type").order_by("-check_in").first()
+            # ✅ si viene ticket_id (desde sidebar "Pagos pendientes"), usar ese ticket exacto
+            ticket_id = close_form.cleaned_data.get("ticket_id")
+            ticket = None
 
-            # ✅ AJUSTE: si no, PENDING sin cierre (sin created_by)
-            if not ticket:
-                ticket = Ticket.objects.filter(
-                    plate__iexact=plate,
-                    status="PENDING",
-                    closure__isnull=True
-                ).select_related("vehicle_type").order_by("-check_in").first()
+            if ticket_id:
+                ticket = (
+                    Ticket.objects.filter(id=ticket_id, closure__isnull=True)
+                    .select_related("vehicle_type", "company", "payment")
+                    .first()
+                )
 
-            if not ticket:
-                messages.error(request, "No existe un ticket activo o pendiente.")
+                if not ticket:
+                    messages.error(request, "El ticket seleccionado ya no existe o ya fue cerrado.")
+                    return redirect(f"{reverse('parking:operator_panel')}?mode=charge")
+
+                # seguridad extra: placa del ticket debe coincidir con la digitada
+                ticket_plate_cmp = (ticket.plate or "").strip().upper().replace(" ", "").replace("-", "")
+                if ticket_plate_cmp != plate:
+                    messages.error(request, "La placa no coincide con el ticket seleccionado.")
+                    return redirect(f"{reverse('parking:operator_panel')}?mode=charge")
+
             else:
-                # -------------------------
-                # CASO PENDING: SOLO CASH/TRANSFER
-                # -------------------------
-                if ticket.status == "PENDING":
-                    if method not in ("CASH", "TRANSFER"):
-                        messages.error(request, "Un ticket PENDIENTE solo puede pagarse con EFECTIVO o TRANSFERENCIA.")
-                    else:
-                        customer = None
+                # ✅ Desde menú Pagos: SOLO ACTIVE por placa
+                ticket = (
+                    Ticket.objects.filter(plate__iexact=plate, status="ACTIVE")
+                    .select_related("vehicle_type", "company", "payment")
+                    .order_by("-check_in")
+                    .first()
+                )
 
-                        if method in ("CASH", "TRANSFER") and invoice_required:
-                            if not customer_obj and id_number:
-                                customer_obj = Customer.objects.filter(id_number=id_number).first()
+            # ✅ AJUSTE CRÍTICO: si no hay ticket, DEBES retornar (antes no lo hacías)
+            if not ticket:
+                messages.error(
+                    request,
+                    "En Pagos (menú) solo se procesa un ticket ACTIVO. "
+                    "Los pendientes se pagan desde la pestaña Pagos pendientes."
+                )
+                return redirect(f"{reverse('parking:operator_panel')}?mode=charge")
 
-                            if customer_obj:
-                                customer = customer_obj
-                            else:
-                                if not id_number:
-                                    close_form.add_error("id_number", "La cédula/NIT es obligatoria para factura.")
-                                    messages.error(request, "Para factura electrónica debes ingresar cédula/NIT.")
-                                    customer = None
-                                elif not full_name or not email:
-                                    if not full_name:
-                                        close_form.add_error("full_name", "El nombre/razón social es obligatorio si el cliente no existe.")
-                                    if not email:
-                                        close_form.add_error("email", "El correo es obligatorio si el cliente no existe.")
-                                    messages.error(request, "Cliente no encontrado. Completa nombre y correo para registrarlo.")
-                                    customer = None
-                                else:
-                                    customer = Customer.objects.create(
-                                        id_number=id_number,
-                                        full_name=full_name,
-                                        email=email,
-                                        active=True,
-                                        is_company=False
-                                    )
-                                    force_credit_disabled(customer)
+            # =========================
+            # 🔒 DOBLE BLOQUEO: si el ticket tiene placa mensual, no permitir (aunque venga por ID)
+            # =========================
+            ticket_plate_norm = (ticket.plate or "").strip().upper().replace(" ", "").replace("-", "")
+            if ticket_plate_norm and MonthlyPlate.objects.filter(plate__iexact=ticket_plate_norm).exists():
+                messages.error(
+                    request,
+                    "Este ticket corresponde a una placa MENSUAL. No debe pagarse aquí."
+                )
+                return redirect(f"{reverse('parking:operator_panel')}?mode=charge")
 
-                        if method in ("CASH", "TRANSFER") and invoice_required and close_form.errors:
-                            pass
-                        else:
-                            now = timezone.now()
+            # =========================================================
+            # ✅ AJUSTE CLAVE (TU PROBLEMA):
+            # Si el ticket YA está asociado a una empresa:
+            # - si la empresa tiene crédito => NO se paga aquí (se liquida en company_settle)
+            # - si NO tiene crédito => se puede pagar en caja, PERO NO con factura electrónica por cliente
+            # =========================================================
+            # =========================================================
+            # ✅ REGLA CORRECTA:
+            # - ASSIGNED (crédito) => NO se paga aquí
+            # - PENDING => SÍ se paga aquí (y puede tener FE por cliente)
+            # =========================================================
+            # =========================================================
+            # REGLA CORRECTA:
+            # SOLO bloquear si el estado es ASSIGNED
+            # =========================================================
+            if ticket.status == "ASSIGNED":
+                comp = getattr(ticket, "company", None)
+                comp_name = getattr(comp, "full_name", "Empresa")
 
-                            if not ticket.check_out:
-                                ticket.check_out = now
-                            ticket.closed_by = request.user
-                            ticket.status = "PAID"
-                            ticket.company = None
-                            ticket.save(update_fields=["check_out", "closed_by", "status", "company"])
+                messages.error(
+                    request,
+                    f"Este ticket está asignado a la empresa '{comp_name}' (crédito). "
+                    "Debe liquidarse por el módulo de Empresas, no por Operario."
+                )
+                return redirect(f"{reverse('parking:operator_panel')}?mode=charge")
 
-                            payment_obj, _ = Payment.objects.update_or_create(
-                                ticket=ticket,
-                                defaults={
-                                    "method": method,
-                                    "status": "PAID",
-                                    "transfer_ref": transfer_ref if method == "TRANSFER" else "",
-                                    "company": None,
-                                    "amount_cop": int(ticket.total_amount_cop or 0),
-                                    "invoice_required": invoice_required,
-                                    "customer": customer if invoice_required else None,
-                                }
-                            )
 
-                            if not invoice_required and getattr(payment_obj, "customer_id", None):
-                                payment_obj.customer = None
-                                payment_obj.save(update_fields=["customer"])
+            # ✅ IMPORTANTE:
+            # Si es PENDING, NO tocar invoice_required ni limpiar customer.
+            # (si el form trae factura electrónica, se permite)
 
-                            # =========================
-                            # ✅ NUEVO: PREVIEW FACTURA ELECTRÓNICA (PRINT)
-                            # =========================
-                            if invoice_required:
-                                emit_electronic_invoice_preview(
-                                    id_number=(getattr(customer, "id_number", "") or id_number).strip(),
-                                    full_name=(getattr(customer, "full_name", "") or full_name).strip(),
-                                    email=(getattr(customer, "email", "") or email).strip(),
-                                    total_amount_cop=int(getattr(payment_obj, "amount_cop", 0) or 0),
-                                )
 
-                            return redirect("parking:print_receipt", payment_id=payment_obj.id)
+            # -------------------------
+            # CASO PENDING: SOLO CASH/TRANSFER
+            # -------------------------
+            if ticket.status == "PENDING":
+                if method not in ("CASH", "TRANSFER"):
+                    messages.error(request, "Un ticket PENDIENTE solo puede pagarse con EFECTIVO o TRANSFERENCIA.")
+                    return redirect(f"{reverse('parking:operator_panel')}?mode=charge")
 
-                # -------------------------
-                # CASO ACTIVE: congelar total con lógica por tramos
-                # -------------------------
-                elif ticket.status == "ACTIVE":
-                    now = timezone.now()
+                customer = None
 
-                    customer = None
-                    if method in ("CASH", "TRANSFER") and invoice_required:
-                        if not customer_obj and id_number:
-                            customer_obj = Customer.objects.filter(id_number=id_number).first()
+                # ✅ Solo resolver/crear customer si realmente se permite factura electrónica
+                if method in ("CASH", "TRANSFER") and invoice_required:
+                    customer, err = resolve_or_create_customer(
+                        id_number=id_number,
+                        full_name=full_name,
+                        email=email,
+                        customer_obj=customer_obj,
+                    )
+                    if err:
+                        messages.error(request, err)
+                        if "NIT" in err or "cédula" in err:
+                            close_form.add_error("id_number", err)
+                        elif "nombre" in err or "razón" in err:
+                            close_form.add_error("full_name", err)
+                        elif "correo" in err:
+                            close_form.add_error("email", err)
+                        return redirect(f"{reverse('parking:operator_panel')}?mode=charge")
 
-                        if customer_obj:
-                            customer = customer_obj
-                        else:
-                            if not id_number:
-                                close_form.add_error("id_number", "La cédula/NIT es obligatoria para factura.")
-                                messages.error(request, "Para factura electrónica debes ingresar cédula/NIT.")
-                                customer = None
-                            elif not full_name or not email:
-                                if not full_name:
-                                    close_form.add_error("full_name", "El nombre/razón social es obligatorio si el cliente no existe.")
-                                if not email:
-                                    close_form.add_error("email", "El correo es obligatorio si el cliente no existe.")
-                                messages.error(request, "Cliente no encontrado. Completa nombre y correo para registrarlo.")
-                                customer = None
-                            else:
-                                customer = Customer.objects.create(
-                                    id_number=id_number,
-                                    full_name=full_name,
-                                    email=email,
-                                    active=True,
-                                    is_company=False
-                                )
-                                force_credit_disabled(customer)
+                now = timezone.now()
+                if not ticket.check_out:
+                    ticket.check_out = now
+                ticket.closed_by = request.user
+                ticket.status = "PAID"
 
-                    if method in ("CASH", "TRANSFER") and invoice_required and close_form.errors:
-                        pass
-                    else:
-                        ticket.check_out = now
-                        ticket.closed_by = request.user
+                # ✅ Mantén consistencia: en PENDING caja, ticket deja de estar asociado a empresa
+                ticket.company = None
 
-                        work_type_u = (work_type or "").upper()
-                        if work_type_u == "NONE":
-                            work_type = "NONE"
-                            work_amount_cop = 0
+                ticket.save(update_fields=["check_out", "closed_by", "status", "company"])
 
-                        ticket.work_type = work_type
-                        ticket.work_amount_cop = work_amount_cop
-                        ticket.service_type = "NONE"
-                        ticket.service_amount_cop = 0
+                payment_obj, _ = Payment.objects.update_or_create(
+                    ticket=ticket,
+                    defaults={
+                        "method": method,
+                        "status": "PAID",
+                        "transfer_ref": transfer_ref if method == "TRANSFER" else "",
+                        "company": None,
+                        "amount_cop": int(ticket.total_amount_cop or 0),
+                        "invoice_required": invoice_required,
+                        "customer": customer if invoice_required else None,
+                    }
+                )
 
-                        # ✅ cálculo nuevo
-                        amount = int(estimate_amount_cop(ticket, now=now) or 0)
-                        ticket.total_amount_cop = amount
+                # ✅ PREVIEW FACTURA ELECTRÓNICA (solo si invoice_required=True y customer existe)
+                if invoice_required and customer:
+                    emit_electronic_invoice_preview(
+                        id_number=(getattr(customer, "id_number", "") or "").strip(),
+                        full_name=(getattr(customer, "full_name", "") or "").strip(),
+                        email=(getattr(customer, "email", "") or "").strip(),
+                        items=[{
+                            "plate": ticket.plate,
+                            "price": int(getattr(payment_obj, "amount_cop", 0) or 0),
+                        }],
+                    )
 
-                        if method in ("CASH", "TRANSFER"):
-                            ticket.status = "PAID"
-                            ticket.company = None
-                            ticket.save()
+                return redirect("parking:print_receipt", payment_id=payment_obj.id)
 
-                            payment_obj, _ = Payment.objects.update_or_create(
-                                ticket=ticket,
-                                defaults={
-                                    "method": method,
-                                    "status": "PAID",
-                                    "transfer_ref": transfer_ref if method == "TRANSFER" else "",
-                                    "company": None,
-                                    "amount_cop": ticket.total_amount_cop,
-                                    "invoice_required": invoice_required,
-                                    "customer": customer
-                                }
-                            )
+            # -------------------------
+            # CASO ACTIVE
+            # -------------------------
+            elif ticket.status == "ACTIVE":
+                now = timezone.now()
 
-                            # =========================
-                            # ✅ NUEVO: PREVIEW FACTURA ELECTRÓNICA (PRINT)
-                            # =========================
-                            if invoice_required:
-                                emit_electronic_invoice_preview(
-                                    id_number=(getattr(customer, "id_number", "") or id_number).strip(),
-                                    full_name=(getattr(customer, "full_name", "") or full_name).strip(),
-                                    email=(getattr(customer, "email", "") or email).strip(),
-                                    total_amount_cop=int(getattr(payment_obj, "amount_cop", 0) or 0),
-                                )
+                customer = None
+                if method in ("CASH", "TRANSFER") and invoice_required:
+                    customer, err = resolve_or_create_customer(
+                        id_number=id_number,
+                        full_name=full_name,
+                        email=email,
+                        customer_obj=customer_obj,
+                    )
+                    if err:
+                        messages.error(request, err)
+                        if "NIT" in err or "cédula" in err:
+                            close_form.add_error("id_number", err)
+                        elif "nombre" in err or "razón" in err:
+                            close_form.add_error("full_name", err)
+                        elif "correo" in err:
+                            close_form.add_error("email", err)
+                        return redirect(f"{reverse('parking:operator_panel')}?mode=charge")
 
-                            return redirect("parking:print_receipt", payment_id=payment_obj.id)
-                        else:
-                            # empresa con crédito => ASSIGNED; empresa sin crédito => PENDING
-                            ticket.company = company
-                            ticket.status = "ASSIGNED" if getattr(company, "credit_enabled", False) else "PENDING"
-                            ticket.save()
+                ticket.check_out = now
+                ticket.closed_by = request.user
 
-                            payment_obj, _ = Payment.objects.update_or_create(
-                                ticket=ticket,
-                                defaults={
-                                    "method": "CREDIT",
-                                    "status": "PENDING",
-                                    "company": company,
-                                    "amount_cop": ticket.total_amount_cop,
-                                    "invoice_required": False,
-                                    "customer": None,
-                                    "transfer_ref": ""
-                                }
-                            )
-                            return redirect("parking:print_receipt", payment_id=payment_obj.id)
+                work_type_u = (work_type or "").upper()
+                if work_type_u == "NONE":
+                    work_type = "NONE"
+                    work_amount_cop = 0
+
+                ticket.work_type = work_type
+                ticket.work_amount_cop = work_amount_cop
+                ticket.service_type = "NONE"
+                ticket.service_amount_cop = 0
+
+                amount = int(estimate_amount_cop(ticket, now=now) or 0)
+                ticket.total_amount_cop = amount
+
+                if method in ("CASH", "TRANSFER"):
+                    ticket.status = "PAID"
+                    ticket.company = None
+                    ticket.save()
+
+                    payment_obj, _ = Payment.objects.update_or_create(
+                        ticket=ticket,
+                        defaults={
+                            "method": method,
+                            "status": "PAID",
+                            "transfer_ref": transfer_ref if method == "TRANSFER" else "",
+                            "company": None,
+                            "amount_cop": ticket.total_amount_cop,
+                            "invoice_required": invoice_required,
+                            "customer": customer if invoice_required else None,
+                        }
+                    )
+
+                    if invoice_required and customer:
+                        emit_electronic_invoice_preview(
+                            id_number=(getattr(customer, "id_number", "") or "").strip(),
+                            full_name=(getattr(customer, "full_name", "") or "").strip(),
+                            email=(getattr(customer, "email", "") or "").strip(),
+                            items=[{
+                                "plate": ticket.plate,
+                                "price": int(getattr(payment_obj, "amount_cop", 0) or 0),
+                            }],
+                        )
+
+                    return redirect("parking:print_receipt", payment_id=payment_obj.id)
+
+                else:
+                    # empresa con crédito => ASSIGNED; empresa sin crédito => PENDING
+                    ticket.company = company
+                    ticket.status = "ASSIGNED" if getattr(company, "credit_enabled", False) else "PENDING"
+                    ticket.save()
+
+                    payment_obj, _ = Payment.objects.update_or_create(
+                        ticket=ticket,
+                        defaults={
+                            "method": "CREDIT",
+                            "status": "PENDING",
+                            "company": company,
+                            "amount_cop": ticket.total_amount_cop,
+                            "invoice_required": False,
+                            "customer": None,
+                            "transfer_ref": "",
+                        }
+                    )
+                    return redirect("parking:print_receipt", payment_id=payment_obj.id)
+        else:
+            print("FORM ERRORS:", close_form.errors)
 
 
     # INSPECT
@@ -1041,7 +1270,8 @@ def generate_closure(request):
 
     # Si llegamos aquí, hay algo cerrable
     tickets_list = closable_list + pending_list  # pendientes se muestran, pero NO entran al cierre
-    active_count = Ticket.objects.filter(status="ACTIVE").count()
+    active_tickets_count, monthly_count, active_count = _yard_counts()
+
 
     now = timezone.now()
     last_closure = Closure.objects.order_by("-date").first()
@@ -1110,6 +1340,8 @@ def generate_closure(request):
     context = {
         "closure": closure,
         "tickets": tickets_list,
+        "active_tickets_count": active_tickets_count,
+        "monthly_count": monthly_count,
         "active_count": active_count,
         "total_parking": fmt_cop(total_parking),
         "total_service": fmt_cop(total_service),
@@ -1129,12 +1361,24 @@ def generate_closure(request):
 @staff_member_required(login_url="parking:login")
 def create_customer(request):
     if request.method == "POST":
-        form = CustomerForm(request.POST)
+        post = request.POST.copy()
+
+        # ✅ Normaliza NIT/CC (quita puntos/guiones/espacios)
+        post["id_number"] = normalize_id_number(post.get("id_number") or "")
+
+        # ✅ Si ya existe, lo actualizamos (no intentamos crear)
+        existing = Customer.objects.filter(id_number=post["id_number"]).first()
+
+        form = CustomerForm(post, instance=existing)
         if form.is_valid():
             form.save()
-            messages.success(request, "Cliente registrado correctamente.")
+            messages.success(
+                request,
+                "Cliente actualizado correctamente." if existing else "Cliente registrado correctamente."
+            )
             return redirect("parking:gestion")
-        messages.error(request, "Error al registrar. Verifique los datos.")
+
+        messages.error(request, "Error al guardar. Verifique los datos.")
     else:
         form = CustomerForm()
 
@@ -1188,21 +1432,69 @@ def gestion(request):
     # Lookup Customer (AJAX)
     # =========================
     if mode == "lookup_customer":
-        id_val = request.GET.get("id", "").strip()
-        customer = Customer.objects.filter(id_number=id_val).first()
-        if customer:
-            return JsonResponse({
-                "found": True,
-                "full_name": customer.full_name,
-                "email": customer.email,
-                "is_company": customer.is_company,
-                "credit_enabled": getattr(customer, "credit_enabled", False),
-            })
-        return JsonResponse({"found": False})
+        by = (request.GET.get("by") or "nit").strip().lower()   # nit | name
+        q  = (request.GET.get("q")  or "").strip()
+
+        # fallback: compatibilidad con tu front actual (que manda ?id=...)
+        if not q:
+            q = (request.GET.get("id") or "").strip()
+            by = "nit"
+
+        if not q:
+            return JsonResponse({"found": False, "results": []})
+
+        # -------------------------
+        # 1) Buscar por NIT/CC exacto
+        # -------------------------
+        if by in ("nit", "id", "id_number"):
+            q_raw = q
+            q_norm = normalize_id_number(q)
+            customer = (
+                Customer.objects.filter(id_number=q_raw).first()
+                or Customer.objects.filter(id_number=q_norm).first()
+            )
+
+            if customer:
+                return JsonResponse({
+                    "found": True,
+                    "mode": "single",
+                    "full_name": customer.full_name,
+                    "email": customer.email,
+                    "id_number": customer.id_number,
+                    "is_company": customer.is_company,
+                    "credit_enabled": getattr(customer, "credit_enabled", False),
+                })
+            return JsonResponse({"found": False, "mode": "single"})
+
+        # -------------------------
+        # 2) Buscar por Nombre (sugerencias)
+        # -------------------------
+        # Nota: usamos icontains para que funcione con fragmentos.
+        # Limitamos resultados para no saturar.
+        qs = (
+            Customer.objects.filter(full_name__icontains=q, active=True)
+            .order_by("full_name")[:10]
+        )
+
+        results = [{
+            "id_number": c.id_number,
+            "full_name": c.full_name,
+            "email": c.email,
+            "is_company": c.is_company,
+            "credit_enabled": getattr(c, "credit_enabled", False),
+        } for c in qs]
+
+        return JsonResponse({
+            "found": len(results) > 0,
+            "mode": "list",
+            "results": results
+        })
+
 
     # =========================
     # ✅ NUEVO: CLIENTES MENSUALES (ADMIN)
     # =========================
+
     if mode == "monthly":
         # =========================
         # ✅ LISTADO PLACAS MENSUALES
@@ -1464,7 +1756,7 @@ def gestion(request):
             return JsonResponse({"success": False, "message": "Empresa no válida o no habilitada para crédito."})
 
         qs = (
-            Ticket.objects.filter(company=company, status="ASSIGNED", closure__isnull=True)
+            Ticket.objects.filter(company=company, status="ASSIGNED")
             .select_related("vehicle_type")
             .order_by("-check_in")[:500]
         )
@@ -1543,7 +1835,7 @@ def gestion(request):
                     return redirect(f"{reverse('parking:gestion')}?mode=company_settle")
 
                 # Base queryset: lo elegible en backend
-                base_qs = Ticket.objects.filter(company=company, status="ASSIGNED", closure__isnull=True)
+                base_qs = Ticket.objects.filter(company=company, status="ASSIGNED")
 
                 # Si viene payload_ids, procesamos SOLO esos (evita desalineaciones UI/BD)
                 if payload_ids:
@@ -1670,8 +1962,12 @@ def gestion(request):
                         id_number=(getattr(company, "id_number", "") or "").strip(),
                         full_name=(getattr(company, "full_name", "") or "").strip(),
                         email=(getattr(company, "email", "") or "").strip(),
-                        total_amount_cop=int(receipt_data["receipt"].get("amount_total_cop") or 0),
+                        items=[
+                            {"plate": x["plate"], "price": int(x["total"] or 0)}
+                            for x in (receipt_tickets or [])
+                        ],
                     )
+
 
                 request.session["last_company_settlement"] = receipt_data
                 request.session.modified = True
@@ -1920,7 +2216,10 @@ def monthly_charge(request, pk: int):
                 id_number=(getattr(customer, "id_number", "") or id_number).strip(),
                 full_name=(getattr(customer, "full_name", "") or full_name).strip(),
                 email=(getattr(customer, "email", "") or email).strip(),
-                total_amount_cop=int(getattr(p, "amount_cop", 0) or 0),
+                items=[{
+                    "plate": obj.plate,  # MonthlyPlate
+                    "price": int(getattr(p, "amount_cop", 0) or 0),
+                }],
             )
 
 
@@ -1957,6 +2256,7 @@ def monthly_charge(request, pk: int):
 
 @staff_member_required(login_url="parking:login")
 def monthly_receipt(request):
+
     data = request.session.get("last_monthly_payment")
     if not data:
         messages.warning(request, "No hay un recibo mensual reciente en sesión.")
@@ -1964,11 +2264,26 @@ def monthly_receipt(request):
 
     receipt = data.get("receipt") or {}
 
-    # ✅ FORMATEOS PARA HTML
+    # 🔒 EVITAR generar consecutivo si ya existe en sesión
+    if not receipt.get("receipt_number"):
+
+        last = MonthlyReceipt.objects.aggregate(
+            Max("consecutive")
+        )["consecutive__max"] or 0
+
+        new_consecutive = last + 1
+
+        receipt_obj = MonthlyReceipt.objects.create(
+            consecutive=new_consecutive,
+            amount_cop=receipt.get("amount_cop", 0),
+        )
+
+        receipt["receipt_number"] = receipt_obj.consecutive
+
+    # ✅ FORMATEO PARA HTML
     receipt["print_amount"] = fmt_cop(receipt.get("amount_cop", 0))
 
-    # (opcional) si quieres también mostrar “payment_id” etc. no hace falta
-
+    # Guardar nuevamente en sesión
     data["receipt"] = receipt
     request.session["last_monthly_payment"] = data
     request.session.modified = True
@@ -1981,43 +2296,58 @@ def monthly_receipt(request):
         "finish_url": finish_url,
     })
 
-
+from django.db.models import Max
+from .models import CompanyReceiptNumber  # el nuevo modelo simple
 
 @staff_member_required(login_url="parking:login")
 def company_settle_receipt(request):
-    """
-    Recibo consolidado usando SESSION (no requiere modelo nuevo).
-    Ajuste: formatea montos (print_*) para el HTML, sin usar intcomma.
-    """
     data = request.session.get("last_company_settlement")
     if not data:
         messages.error(request, "No hay un recibo reciente para mostrar.")
         return redirect(f"{reverse('parking:gestion')}?mode=company_settle")
 
-    # ===== AJUSTE NECESARIO =====
     receipt = data.get("receipt") or {}
 
-    # Formato COP igual al resto del sistema
+    # ✅ Formateos COP
     receipt["print_amount_parking"] = fmt_cop(receipt.get("amount_parking_cop", 0))
     receipt["print_amount_service"] = fmt_cop(receipt.get("amount_service_cop", 0))
     receipt["print_amount_total"] = fmt_cop(receipt.get("amount_total_cop", 0))
 
-    data["receipt"] = receipt
-    # ===========================
+    # ✅ Número consecutivo 1,2,3... (solo una vez)
+    if not receipt.get("receipt_number"):
+        last = CompanyReceiptNumber.objects.aggregate(Max("consecutive"))["consecutive__max"] or 0
+        new_consecutive = last + 1
 
-    return render(request, "parking/company_settle_receipt.html", data)
+        obj = CompanyReceiptNumber.objects.create(
+            consecutive=new_consecutive,
+            amount_cop=int(receipt.get("amount_total_cop", 0) or 0),
+        )
+        receipt["receipt_number"] = obj.consecutive
+
+    # ✅ Guardar sin modificar otras llaves (lista incluida)
+    data["receipt"] = receipt
+    request.session["last_company_settlement"] = data
+    request.session.modified = True
+
+    return render(request, "parking/company_settle_receipt.html", {
+        **data,           # mantiene TODO lo que ya venía (incluida la lista si estaba afuera)
+        "receipt": receipt,  # y además pasa receipt explícito
+    })
+
+
 
 @login_required
 def active_vehicles_report(request):
-    active_tickets = list(
+
+    qs = (
         Ticket.objects.filter(status="ACTIVE")
         .select_related("vehicle_type")
         .order_by("check_in")
     )
 
-    is_admin = bool(request.user.is_staff or request.user.is_superuser)
+    active_count = qs.count()
 
-    next_url = _safe_next(request, request.GET.get("next") or "")
+    is_admin = bool(request.user.is_staff or request.user.is_superuser)
 
     # ✅ MENÚ PRINCIPAL según rol
     if is_admin:
@@ -2027,12 +2357,34 @@ def active_vehicles_report(request):
 
     finish_url = menu_url
 
-    return render(request, "parking/active_vehicles_report.html", {
-        "active_tickets": active_tickets,
-        "active_count": len(active_tickets),
-        "now": timezone.now(),
-        "finish_url": finish_url,  # 👈 SOLO esto usa el template
-    })
+    # 🔒 NO generar reporte si no hay activos
+    if active_count == 0:
+        messages.info(request, "No hay vehículos activos para imprimir.")
+        return redirect(finish_url)
+
+    # ✅ GENERAR CONSECUTIVO REAL
+    last = ActiveVehiclesReport.objects.aggregate(
+        Max("consecutive")
+    )["consecutive__max"] or 0
+
+    new_consecutive = last + 1
+
+    report = ActiveVehiclesReport.objects.create(
+        consecutive=new_consecutive,
+        active_count=active_count,
+    )
+
+    return render(
+        request,
+        "parking/active_vehicles_report.html",
+        {
+            "active_tickets": qs,
+            "active_count": active_count,
+            "now": timezone.now(),
+            "finish_url": finish_url,
+            "report_id": report.consecutive,  # 👈 formato bonito 00001
+        },
+    )
 
 @staff_member_required(login_url="parking:login")
 def admin_dashboard(request):
@@ -2242,7 +2594,7 @@ def einvoice_retry(request, pk):
             id_number=inv.id_number,
             full_name=inv.full_name,
             email=inv.email,
-            total_amount_cop=int(inv.total_amount_cop),
+            items=list(inv.items or []),   # ✅ CAMBIO CLAVE
         )
 
         # ✅ NUEVA REGLA: si no hay excepción, asumimos éxito,
@@ -2285,8 +2637,9 @@ def einvoices_retry_all(request):
                 id_number=inv.id_number,
                 full_name=inv.full_name,
                 email=inv.email,
-                total_amount_cop=int(inv.total_amount_cop),
+                items=list(inv.items or []),   # ✅ CAMBIO CLAVE
             )
+
 
             # ✅ NUEVA REGLA: éxito si no hay excepción,
             # salvo que el retorno indique explícitamente un error.

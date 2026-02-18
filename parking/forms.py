@@ -7,13 +7,14 @@ from django.urls import reverse
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.db import transaction
+import re
 from .models import (
     Ticket,
     VehicleType,
     Customer,
     RatePlan,
     MonthlyPlate,
-    ElectronicInvoiceOutbox
+    ElectronicInvoiceOutbox,WorkType
 )
 # forms.py
 
@@ -386,19 +387,53 @@ class TicketCreateForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        # Mostrar solo opciones activas
         self.fields["vehicle_type"].queryset = VehicleType.objects.filter(active=True)
-
-        # Forzar selección
         self.fields["vehicle_type"].required = True
         self.fields["client_kind"].required = True
-
         self.fields["vehicle_type"].empty_label = "Seleccione tipo vehículo..."
 
-        # Choices fijos para client_kind (NO depende de tabla)
         self.fields["client_kind"].choices = [("", "Seleccione tipo cliente...")] + list(
             getattr(Ticket, "CLIENT_KIND_CHOICES", [])
         )
+
+    def clean_plate(self):
+        raw = (self.cleaned_data.get("plate") or "").strip().upper()
+
+        # Normalización igual que MonthlyPlateForm (y además quita cualquier símbolo raro)
+        plate = raw.replace(" ", "").replace("-", "")
+        plate = re.sub(r"[^A-Z0-9]", "", plate)
+
+        if not plate:
+            raise forms.ValidationError("La placa es obligatoria.")
+
+        # 1) ❌ Bloquear si es placa mensual
+        mp_qs = MonthlyPlate.objects.all()
+
+        # Filtrar active=True SOLO si existe el campo
+        try:
+            MonthlyPlate._meta.get_field("active")
+            mp_qs = mp_qs.filter(active=True)
+        except Exception:
+            pass
+
+        # ✅ primer intento: match directo (si está normalizada como tu form mensual)
+        if mp_qs.filter(plate__iexact=plate).exists():
+            raise forms.ValidationError("PLACA MENSUAL")
+
+        # ✅ respaldo: por si hay mensuales viejas guardadas con formato raro
+        monthly_set = set(
+            re.sub(r"[^A-Z0-9]", "", (p or "").strip().upper().replace(" ", "").replace("-", ""))
+            for p in mp_qs.values_list("plate", flat=True)
+        )
+        if plate in monthly_set:
+            raise forms.ValidationError("PLACA MENSUAL")
+
+        # 2) ❌ Bloquear si ya existe ACTIVE (PENDING sí se permite)
+        if Ticket.objects.filter(plate__iexact=plate, status="ACTIVE").exists():
+            raise forms.ValidationError("PLACA ACTIVA")
+
+        return plate
+
 
 
 class EditActiveTicketForm(forms.ModelForm):
@@ -429,11 +464,11 @@ class EditActiveTicketForm(forms.ModelForm):
             getattr(Ticket, "CLIENT_KIND_CHOICES", [])
         )
 
-
 class ClosePaymentForm(forms.Form):
+
+    ticket_id = forms.IntegerField(required=False, widget=forms.HiddenInput())
     plate = forms.CharField(max_length=12, label="Placa")
 
-    # sin valor por defecto (primera opción vacía)
     method = forms.ChoiceField(
         label="Método de operación",
         choices=[
@@ -445,18 +480,20 @@ class ClosePaymentForm(forms.Form):
         required=True,
     )
 
-    # sin valor por defecto (primera opción vacía)
-    work_type = forms.ChoiceField(
+    work_type = forms.ModelChoiceField(
         label="Tipo de trabajo",
-        choices=[("", "Seleccione tipo de trabajo...")] + list(Ticket.WORK_TYPE_CHOICES),
-        required=False,  # validado condicionalmente en clean()
+        queryset=WorkType.objects.filter(active=True).order_by("name"),
+        required=False,  # ✅ permite NONE (vacío)
+        empty_label="NONE (sin servicio)",  # ✅ se verá como opción
     )
+
+
 
     work_amount_cop = forms.IntegerField(
         label="Valor trabajo (COP)",
         required=False,
         min_value=0,
-        help_text="Solo aplica si Tipo de trabajo es diferente a 'Ninguno'.",
+        help_text="Solo aplica si seleccionas un tipo de trabajo.",
     )
 
     transfer_ref = forms.CharField(
@@ -472,7 +509,6 @@ class ClosePaymentForm(forms.Form):
         empty_label="Seleccione empresa...",
     )
 
-    # sin valor por defecto (primera opción vacía)
     invoice_required = forms.ChoiceField(
         label="¿Factura electrónica?",
         choices=[("", "Seleccione..."), ("NO", "No"), ("YES", "Sí")],
@@ -490,50 +526,61 @@ class ClosePaymentForm(forms.Form):
         transfer_ref = (cleaned.get("transfer_ref") or "").strip()
         company = cleaned.get("company")
 
-        invoice_required = (cleaned.get("invoice_required") or "").strip()  # "" | NO | YES
+        invoice_required = (cleaned.get("invoice_required") or "").strip()
         id_number = (cleaned.get("id_number") or "").strip()
         full_name = (cleaned.get("full_name") or "").strip()
         email = (cleaned.get("email") or "").strip()
 
-        # Método obligatorio
         if not method:
             raise forms.ValidationError("Debes seleccionar un método de operación.")
 
-        # Trabajo adicional (sin defaults)
-        work_type = (cleaned.get("work_type") or "").strip()  # "" | NONE | ...
-        work_amount = cleaned.get("work_amount_cop")
+        ticket_id = cleaned.get("ticket_id")
+        if ticket_id and method == "CREDIT":
+            raise forms.ValidationError(
+                "Un ticket PENDIENTE no puede asignarse a empresa desde este botón. Usa efectivo o transferencia."
+            )
 
+        # =========================
+        # ✅ Trabajo adicional (FK -> string code)
+        # =========================
+        wt_obj = cleaned.get("work_type")  # WorkType o None
+        wt_code = "NONE"
+        if wt_obj:
+            wt_code = (getattr(wt_obj, "code", "") or "").strip().upper() or "NONE"
+
+        work_amount = cleaned.get("work_amount_cop")
         if work_amount in (None, ""):
             work_amount = 0
         try:
             work_amount = int(work_amount)
         except (TypeError, ValueError):
             raise forms.ValidationError("El valor del trabajo adicional debe ser un número entero (COP).")
-
         if work_amount < 0:
             raise forms.ValidationError("El valor del trabajo adicional no puede ser negativo.")
 
-        if work_type:
-            if work_type != "NONE" and work_amount <= 0:
+        # Si seleccionaron trabajo (no NONE) exige valor > 0
+        if wt_code != "NONE":
+            if work_amount <= 0:
                 raise forms.ValidationError(
                     "Si seleccionas un tipo de trabajo, debes ingresar un valor adicional mayor a 0."
                 )
-            if work_type == "NONE":
-                work_amount = 0
         else:
             work_amount = 0
 
-        cleaned["work_type"] = work_type or "NONE"
+        # ✅ CLAVE: devolvemos STRING para que tu vista siga igual
+        # work_type = (cleaned.get("work_type") or "NONE").strip()
+        cleaned["work_type"] = wt_code
         cleaned["work_amount_cop"] = work_amount
 
+        # =========================
         # Validación por método
+        # =========================
         if method == "TRANSFER" and not transfer_ref:
             raise forms.ValidationError("Para transferencia debes ingresar la referencia o transacción.")
 
         if method == "CREDIT":
             if not company:
                 raise forms.ValidationError("Para asignar a empresa debes seleccionar una empresa.")
-            invoice_required = "NO"
             cleaned["invoice_required"] = "NO"
 
         if method != "TRANSFER":
@@ -544,20 +591,18 @@ class ClosePaymentForm(forms.Form):
 
         # Factura electrónica (solo CASH/TRANSFER)
         invoice_allowed = method in ("CASH", "TRANSFER")
-
         if invoice_allowed:
             if not invoice_required:
                 raise forms.ValidationError("Debes seleccionar si requiere factura electrónica (Sí/No).")
         else:
-            invoice_required = "NO"
             cleaned["invoice_required"] = "NO"
+            invoice_required = "NO"
 
         if invoice_allowed and invoice_required == "YES":
             if not id_number:
                 raise forms.ValidationError("Para factura electrónica debes ingresar la cédula o NIT.")
 
             existing = Customer.objects.filter(id_number=id_number, active=True).first()
-
             if existing:
                 cleaned["_customer_obj"] = existing
                 cleaned["full_name"] = ""
@@ -580,6 +625,7 @@ class ClosePaymentForm(forms.Form):
             cleaned["_customer_obj"] = None
 
         return cleaned
+
 
 
 class CompanySettleForm(forms.Form):
@@ -712,10 +758,11 @@ class EditPaidServiceForm(forms.Form):
     Editar trabajo/servicio en ticket PAID con opciones del modelo (WORK_TYPE_CHOICES).
     - Permite elegir NONE (en ese caso fuerza valor 0).
     """
-    service_type = forms.ChoiceField(
+    service_type = forms.ModelChoiceField(
         label="Tipo de servicio",
-        choices=Ticket.WORK_TYPE_CHOICES,  # incluye NONE
-        required=True,
+        queryset=WorkType.objects.filter(active=True).order_by("name"),
+        required=False,
+        empty_label="Ninguno",
     )
 
     service_amount_cop = forms.IntegerField(
@@ -726,25 +773,36 @@ class EditPaidServiceForm(forms.Form):
 
     def clean(self):
         cleaned = super().clean()
-        stype = (cleaned.get("service_type") or "NONE").strip().upper()
+        obj = cleaned.get("service_type")  # WorkType o None
         amount = cleaned.get("service_amount_cop")
 
         try:
             amount = int(amount or 0)
         except (TypeError, ValueError):
-            raise forms.ValidationError("El valor del servicio debe ser un número entero (COP).")
+            raise forms.ValidationError(
+                "El valor del servicio debe ser un número entero (COP)."
+            )
 
-        if stype == "NONE":
+        # Si no seleccionó nada (empty_label="Ninguno")
+        if obj is None:
             cleaned["service_amount_cop"] = 0
-            cleaned["service_type"] = "NONE"
+            cleaned["service_type"] = None
             return cleaned
 
-        if amount <= 0:
-            raise forms.ValidationError("Si seleccionas un servicio, el valor debe ser mayor a 0.")
+        # Si el WorkType tiene code = "NONE"
+        if getattr(obj, "code", "").upper() == "NONE":
+            cleaned["service_amount_cop"] = 0
+            return cleaned
 
-        cleaned["service_type"] = stype
+        # Si seleccionó servicio real, debe ser > 0
+        if amount <= 0:
+            raise forms.ValidationError(
+                "Si seleccionas un servicio, el valor debe ser mayor a 0."
+            )
+
         cleaned["service_amount_cop"] = amount
         return cleaned
+
 
 
 class InspectForm(forms.Form):

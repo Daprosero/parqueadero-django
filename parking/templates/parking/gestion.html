@@ -532,22 +532,29 @@
         <div class="grid-2">
           <div>
             <label>Parqueadero (COP)</label>
-            <input type="text" id="sumParking" value="0" readonly
-                   style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px; background:#f8f9fa; font-weight:800;">
+            <div id="sumParkingText"
+                style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px; background:#f8f9fa; font-weight:800;">
+              0
+            </div>
           </div>
 
           <div>
-            <label>Servicio (COP) <span style="color:var(--text-muted); font-weight:700;">(editable)</span></label>
-            <input type="text" id="sumService" value="0"
-                   style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+            <label>Servicio (COP)</label>
+            <div id="sumServiceText"
+                style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px; background:#f8f9fa; font-weight:800;">
+              0
+            </div>
           </div>
 
           <div style="grid-column:1 / -1;">
             <label style="font-weight:900;">TOTAL (COP)</label>
-            <input type="text" id="sumTotal" value="0" readonly
-                   style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px; font-weight:900; background:#f8f9fa;">
+            <div id="sumTotalText"
+                style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px; font-weight:900; background:#f8f9fa;">
+              0
+            </div>
           </div>
         </div>
+
 
         {# ✅ hidden para backend #}
         <input type="hidden" name="amount_parking_cop" id="amountParkingHidden" value="0">
@@ -678,9 +685,10 @@
     const empty = document.getElementById("assignedEmpty");
     const body = document.getElementById("assignedBody");
 
-    const sumParking = document.getElementById("sumParking");
-    const sumService = document.getElementById("sumService");
-    const sumTotal = document.getElementById("sumTotal");
+    const sumParkingText = document.getElementById("sumParkingText");
+    const sumServiceText = document.getElementById("sumServiceText");
+    const sumTotalText = document.getElementById("sumTotalText");
+
 
     const hParking = document.getElementById("amountParkingHidden");
     const hService = document.getElementById("amountServiceHidden");
@@ -748,23 +756,25 @@
     }
 
     function syncHiddenAmounts(){
-      const p = Math.max(0, parseNum(sumParking.value));
-      const s = Math.max(0, parseNum(sumService.value));
+      const p = Math.max(0, Number(hParking.value || 0));
+      const s = Math.max(0, Number(hService.value || 0));
       const t = p + s;
 
-      hParking.value = String(p);
-      hService.value = String(s);
-      sumTotal.value = fmt(t);
+      if(sumParkingText) sumParkingText.textContent = fmt(p);
+      if(sumServiceText) sumServiceText.textContent = fmt(s);
+      if(sumTotalText)   sumTotalText.textContent   = fmt(t);
     }
+
 
     function applyServerSums(server){
       const p = Math.max(0, Number(server?.sum_parking || 0));
       const s = Math.max(0, Number(server?.sum_service || 0));
 
-      sumParking.value = fmt(p);
-      sumService.value = fmt(s);
+      hParking.value = String(p);
+      hService.value = String(s);
       syncHiddenAmounts();
     }
+
 
     function renderTickets(){
       body.innerHTML = "";
@@ -773,9 +783,10 @@
         wrap.style.display = "none";
         empty.style.display = "";
         payload.value = "";
-        sumParking.value = fmt(0);
-        sumService.value = fmt(0);
+        hParking.value = "0";
+        hService.value = "0";
         syncHiddenAmounts();
+
         validateReady();
         return;
       }
@@ -812,9 +823,10 @@
       const inv = (invoiceSel?.value || "").trim();
       const invOk = (inv === "NO" || inv === "YES");
 
-      const p = parseNum(sumParking.value);
-      const s = parseNum(sumService.value);
+      const p = Number(hParking.value || 0);
+      const s = Number(hService.value || 0);
       const amountsOk = (p + s) > 0;
+
 
       // ✅ EMPRESA: NO validamos datos de factura (backend usa company)
       const invoiceDataOk = true;
@@ -889,16 +901,6 @@
       toggleInvoice();
       validateReady();
     });
-
-    // ✅ SOLO servicio editable
-    if(sumService){
-      sumService.addEventListener("input", () => { syncHiddenAmounts(); validateReady(); });
-      sumService.addEventListener("blur", () => {
-        sumService.value = fmt(parseNum(sumService.value));
-        syncHiddenAmounts();
-        validateReady();
-      });
-    }
 
     // init
     toggleTransfer();
@@ -1902,14 +1904,33 @@
             <div id="monthlyInvoiceFields" style="display:none; margin-top:10px;">
               <div class="grid-2">
                 <div>
-                  <label for="monthlyInvoiceId">Cédula o NIT</label>
-                  <input type="text"
-                         id="monthlyInvoiceId"
-                         name="id_number"
-                         placeholder="Solo números">
+                  <label style="font-weight:700; font-size:0.9rem; color:var(--text-main);">
+                    Buscar cliente
+                  </label>
+                  <!-- ✅ Buscar por nombre -->
+                  <input
+                    id="monthlyCustomerNameSearch"
+                    type="text"
+                    placeholder="Escribe el nombre del cliente…"
+                    style="margin-top:6px;"
+                  />
+                  <!-- ✅ sugerencias (nombre + NIT) -->
+                  <div
+                    id="monthlyCustomerSuggestions"
+                    style="display:none; margin-top:8px; border:1px solid var(--border); border-radius:10px; overflow:hidden; background:#fff;"
+                  ></div>
+                  <!-- ✅ NIT manual (solo si NO aparece en búsqueda) -->
+                  <div id="monthlyNitRow" style="display:none; margin-top:10px;">
+                    <label for="monthlyInvoiceId">Cédula o NIT</label>
+                    <input type="text"
+                          id="monthlyInvoiceId"
+                          name="id_number"
+                          placeholder="Solo números">
+                    <div id="monthlyInvIdErr" class="error-msg" style="display:none;">Ingresa cédula/NIT.</div>
+                  </div>
                   <span id="monthlyCustomerHint" class="hint-chip" style="display:none;"></span>
-                  <div id="monthlyInvIdErr" class="error-msg" style="display:none;">Ingresa cédula/NIT.</div>
                 </div>
+
 
                 <div>
                   <label for="monthlyInvoiceName">Nombre / Razón social</label>
@@ -2148,50 +2169,86 @@
       const hint = document.getElementById("monthlyChargeHint");
       const err = document.getElementById("monthlyAmountErr");
 
+      const nameSearchInput = document.getElementById("monthlyCustomerNameSearch");
+      const suggestionsBox = document.getElementById("monthlyCustomerSuggestions");
+      const nitRow = document.getElementById("monthlyNitRow");
+
       // ====== estado lookup cliente ======
       let customerFound = false;
       let verifiedId = ""; // id_number verificado (cuando exists)
+      let manualMode = false; // ✅ cuando no hay match, permitir crear cliente
+
 
       function normalizeId(s){
         return (s || "").toString().trim().replace(/[^\d]/g, "");
       }
+      function setManualCustomerMode(){
+        manualMode = true;
+        customerFound = false;
+        verifiedId = "";
+
+        show(nitRow, true);
+        show(invName?.closest("div"), true);
+        show(invEmail?.closest("div"), true);
+
+        setChip(customerHint, "warn", "Cliente no existe: completa NIT, nombre y correo");
+      }
+
 
       // ====== mostrar/ocultar name/email según exista o no ======
       function applyInvoiceCustomerUI(){
         const inv = (invSel.value || "").trim();
+
+        // 1) No requiere factura
         if(inv !== "YES"){
+          manualMode = false;
           setChip(customerHint, "", "");
+          show(nitRow, false);
           show(invName?.closest("div"), false);
           show(invEmail?.closest("div"), false);
           return;
         }
 
-        const idv = (invId?.value || "").trim();
+        // 2) Si estamos en modo manual, mostramos TODO aunque falte NIT
+        if(manualMode){
+          show(nitRow, true);
+          show(invName?.closest("div"), true);
+          show(invEmail?.closest("div"), true);
+          if(!customerFound) setChip(customerHint, "warn", "Cliente no existe: completa NIT, nombre y correo");
+          return;
+        }
+
+        // 3) Si NO manual y aún no hay NIT, ocultar campos (solo buscador)
+        const idv = normalizeId(invId?.value || "");
         if(!idv){
           setChip(customerHint, "", "");
+          show(nitRow, false);
           show(invName?.closest("div"), false);
           show(invEmail?.closest("div"), false);
           return;
         }
 
+        // 4) Si está verificado (cliente encontrado)
         const isVerifiedFound = customerFound && verifiedId && verifiedId === idv;
-
         if(isVerifiedFound){
-          // ✅ existe -> no pedir nada, solo chip
           setChip(customerHint, "ok", "Cliente encontrado ✓");
+          show(nitRow, false);
           show(invName?.closest("div"), false);
           show(invEmail?.closest("div"), false);
-
           show(invNameErr, false);
           show(invEmailErr, false);
           invEmail && invEmail.classList.remove("input-error");
         }else{
-          // ✅ no existe -> pedir datos
-          setChip(customerHint, "warn", "Cliente no existe: completa nombre y correo");
+          // 5) Si hay NIT pero no verificado, pedimos datos
+          manualMode = true;
+          show(nitRow, true);
           show(invName?.closest("div"), true);
           show(invEmail?.closest("div"), true);
+          setChip(customerHint, "warn", "Cliente no existe: completa NIT, nombre y correo");
         }
       }
+
+
 
       function clearCustomerFields(keepId){
         customerFound = false;
@@ -2274,22 +2331,28 @@
           // si cambió mientras buscaba, ignora
           if(((invId?.value || "").trim()) !== idv) return;
 
-          if(data && data.found){
+          if (data && data.found) {
+            manualMode = false;
             customerFound = true;
             verifiedId = idv;
 
-            // llenamos por si el backend los usa (aunque se oculten)
-            if(invName) invName.value = data.full_name || "";
-            if(invEmail) invEmail.value = data.email || "";
+            if (invName) invName.value = data.full_name || "";
+            if (invEmail) invEmail.value = data.email || "";
 
             setChip(customerHint, "ok", "Cliente encontrado ✓");
-          }else{
+          } else {
+            // ✅ NO existe -> activar manual, pero NO borrar lo que el usuario ya escribió
+            manualMode = true;
             customerFound = false;
             verifiedId = "";
-            if(invName) invName.value = "";
-            if(invEmail) invEmail.value = "";
+
+            show(nitRow, true);
+            show(invName?.closest("div"), true);
+            show(invEmail?.closest("div"), true);
+
             setChip(customerHint, "warn", "Cliente no existe: completa nombre y correo");
           }
+
         }catch(e){
           console.error(e);
           customerFound = false;
@@ -2302,6 +2365,86 @@
         applyInvoiceCustomerUI();
         validate();
       }
+      
+      if (nameSearchInput) {
+        nameSearchInput.addEventListener("input", async function(){
+          const q = (this.value || "").trim();
+
+          // Si está muy corto: ocultar sugerencias y volver a manual (si factura=YES)
+          if (!q || q.length < 2) {
+            if (suggestionsBox) suggestionsBox.style.display = "none";
+            if ((invSel.value || "").trim() === "YES") setManualCustomerMode();
+            validate(); // ✅ clave para habilitar botón si ya hay datos manuales
+            return;
+          }
+
+          try {
+            const response = await fetch(`?mode=lookup_customer&by=name&q=${encodeURIComponent(q)}`, {
+              headers: { "X-Requested-With": "XMLHttpRequest" }
+            });
+            const data = await response.json();
+
+            // ✅ Si NO hay resultados: modo manual + validar
+            if (!data || !data.results || !data.results.length) {
+              if (suggestionsBox) suggestionsBox.style.display = "none";
+              if ((invSel.value || "").trim() === "YES") setManualCustomerMode();
+              validate();
+              return;
+            }
+
+            // ✅ Hay resultados
+            suggestionsBox.innerHTML = "";
+
+            data.results.forEach(c => {
+              const div = document.createElement("div");
+              div.style.padding = "8px 10px";
+              div.style.cursor = "pointer";
+              div.style.borderBottom = "1px solid var(--border)";
+              div.innerHTML = `<strong>${c.full_name}</strong><br><small>${c.id_number}</small>`;
+
+              div.onclick = function(){
+                // ✅ normaliza NIT (solo dígitos)
+                const nid = normalizeId(c.id_number || "");
+                // ✅ deja el buscador con el nombre completo seleccionado
+                if (nameSearchInput) nameSearchInput.value = (c.full_name || "").trim();
+
+                if (invId) invId.value = nid;
+                if (invName) invName.value = (c.full_name || "").trim();
+                if (invEmail) invEmail.value = (c.email || "").trim();
+
+                // ✅ marcar como encontrado
+                manualMode = false;  // 👈 asegúrate de tener "let manualMode = false;" definido arriba
+                customerFound = true;
+                verifiedId = nid;
+
+                // ✅ UI
+                if (suggestionsBox) suggestionsBox.style.display = "none";
+                show(nitRow, false);
+
+                // ✅ chip OK (no setHint)
+                setChip(customerHint, "ok", "Cliente seleccionado ✓");
+
+                applyInvoiceCustomerUI();
+                validate();
+              };
+
+              suggestionsBox.appendChild(div);
+            });
+
+            suggestionsBox.style.display = "block";
+
+          } catch (err) {
+            // si falla la búsqueda: modo manual + validar
+            if (suggestionsBox) suggestionsBox.style.display = "none";
+            if ((invSel.value || "").trim() === "YES") setManualCustomerMode();
+            validate();
+          }
+        });
+      }
+
+
+
+
 
       function validate(){
         const v = parseNum(amt.value);
@@ -2340,7 +2483,7 @@
         }
 
         if(inv === "YES"){
-          const idv = (invId?.value || "").trim();
+          const idv = normalizeId(invId?.value || "");
           const isVerifiedFound = customerFound && verifiedId && verifiedId === idv;
 
           // id obligatorio
@@ -2404,43 +2547,53 @@
         toggleInvoice();
         validate();
 
-        // opcional: enfocar cédula al elegir "Sí"
+        // ✅ Si eligen "Sí" factura:
         if ((invSel.value || "").trim() === "YES") {
-          setTimeout(() => invId && invId.focus(), 50);
+          // por defecto: si aún no han seleccionado cliente, pedir datos manuales
+          setManualCustomerMode();
+
+          // enfocar el buscador por nombre (ya no el NIT)
+          setTimeout(() => nameSearchInput && nameSearchInput.focus(), 50);
+        } else {
+          // si eligen "No", ocultar sugerencias y modo manual
+          if (suggestionsBox) suggestionsBox.style.display = "none";
+          show(nitRow, false);
         }
       });
 
+
       // id_number: normaliza, invalida estado si cambia, lookup en blur
-      if(invId){
+      if (invId) {
         invId.addEventListener("input", () => {
           const cur = normalizeId(invId.value);
           invId.value = cur;
 
-          // si cambió respecto a lo verificado, invalida y vuelve a pedir verificación
-          if(verifiedId && cur !== verifiedId){
+          // si el usuario está creando cliente (manual), NO borres nombre/correo
+          if (manualMode) {
             customerFound = false;
             verifiedId = "";
-            if(invName) invName.value = "";
-            if(invEmail) invEmail.value = "";
+            setChip(customerHint, cur ? "warn" : "", cur ? "Completa nombre y correo (cliente nuevo)" : "");
+            applyInvoiceCustomerUI();
+            validate();
+            return;
+          }
+
+          // --- modo NO manual (solo verificación normal) ---
+          if (verifiedId && cur !== verifiedId) {
+            customerFound = false;
+            verifiedId = "";
+            if (invName) invName.value = "";
+            if (invEmail) invEmail.value = "";
             setChip(customerHint, "warn", cur ? "Cédula/NIT cambió: verifica (sal del campo)" : "");
-          }else if(!verifiedId){
-            // si no hay verificado, pero está escribiendo, mostrar aviso
+          } else if (!verifiedId) {
             setChip(customerHint, cur ? "warn" : "", cur ? "Verifica cédula/NIT (sal del campo)" : "");
           }
 
           applyInvoiceCustomerUI();
           validate();
         });
-
-        invId.addEventListener("keydown", (e) => {
-          if(e.key === "Enter"){
-            e.preventDefault();
-            invId.blur(); // dispara lookup
-          }
-        });
-
-        invId.addEventListener("blur", lookupCustomer);
       }
+
 
       invName && invName.addEventListener("input", validate);
       invEmail && invEmail.addEventListener("input", validate);

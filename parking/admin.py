@@ -1,23 +1,50 @@
 from django.contrib import admin, messages
 from django.utils.html import format_html
 from django.urls import reverse
-from .models import VehicleType, RatePlan, Ticket, Payment, Customer, Closure,MonthlyPlate
+from .models import VehicleType, RatePlan, Ticket, Payment, Customer, Closure,MonthlyPlate,SystemSettings,WorkType
 from django.utils import timezone
 from .models import ElectronicInvoiceOutbox
-from .utils import emit_electronic_invoice_preview  # 👈 tu función real
-from django.db import IntegrityError
-def try_send_electronic_invoice(obj: ElectronicInvoiceOutbox) -> None:
+from .utils import emit_electronic_invoice_preview,estimate_amount_cop   # 👈 tu función real
+from django.db import IntegrityError,transaction
+
+
+from .models import BusinessInfo
+from .models import Holiday
+
+@admin.register(Holiday)
+class HolidayAdmin(admin.ModelAdmin):
+    list_display = ("date", "name", "active")
+    list_filter = ("active",)
+    search_fields = ("name",)
+    ordering = ("-date",)
+
+@admin.register(BusinessInfo)
+class BusinessInfoAdmin(admin.ModelAdmin):
+    list_display = ("name", "nit", "phone", "email", "updated_at")
+
+def try_send_electronic_invoice(obj: ElectronicInvoiceOutbox) -> dict:
     """
-    Envía usando Siigo con el payload del outbox.
-    Si OK: no retorna nada.
-    Si falla: lanza Exception con mensaje amigable.
+    Envía usando Siigo con el payload del outbox (items).
+    Devuelve el dict de emit_electronic_invoice_preview.
     """
-    emit_electronic_invoice_preview(
+    return emit_electronic_invoice_preview(
         id_number=obj.id_number,
         full_name=obj.full_name,
         email=obj.email,
-        total_amount_cop=obj.total_amount_cop,
+        items=list(obj.items or []),  # ✅ NUEVO
     )
+@admin.register(WorkType)
+class WorkTypeAdmin(admin.ModelAdmin):
+    list_display = ("name", "code", "active")
+    list_filter = ("active",)
+
+@admin.register(SystemSettings)
+class SystemSettingsAdmin(admin.ModelAdmin):
+    list_display = ("day_start", "night_start", "updated_at")
+
+    def has_add_permission(self, request):
+        # Solo permitir una configuración
+        return not SystemSettings.objects.exists()
 
 
 @admin.register(ElectronicInvoiceOutbox)
@@ -29,6 +56,7 @@ class ElectronicInvoiceOutboxAdmin(admin.ModelAdmin):
         "full_name",
         "email",
         "total_amount_cop",
+        "items_count",
         "last_attempt_at",
         "created_at",
     )
@@ -36,15 +64,23 @@ class ElectronicInvoiceOutboxAdmin(admin.ModelAdmin):
     search_fields = ("id_number", "full_name", "email")
     ordering = ("-created_at",)
 
-    readonly_fields = ("created_at", "updated_at", "last_attempt_at")
+    # ✅ total e items_hash NO deberían editarse a mano (los recalcula clean())
+    readonly_fields = ("created_at", "updated_at", "last_attempt_at", "items_hash", "total_amount_cop")
 
     fieldsets = (
         ("Estado", {"fields": ("status", "last_error", "last_attempt_at")}),
-        ("Datos de factura (payload)", {"fields": ("id_number", "full_name", "email", "total_amount_cop")}),
+        ("Datos de factura (payload)", {"fields": ("id_number", "full_name", "email", "items", "total_amount_cop", "items_hash")}),
         ("Timestamps", {"fields": ("created_at", "updated_at")}),
     )
 
     actions = ("retry_send", "clear_error")
+
+    @admin.display(description="# Ítems")
+    def items_count(self, obj: ElectronicInvoiceOutbox) -> int:
+        try:
+            return len(obj.items or [])
+        except Exception:
+            return 0
 
     @admin.action(description="Reintentar envío (si sale OK se elimina)")
     def retry_send(self, request, queryset):
@@ -54,28 +90,37 @@ class ElectronicInvoiceOutboxAdmin(admin.ModelAdmin):
         qs = queryset.filter(status="PENDING")
 
         for obj in qs:
-            # marca intento (aunque falle o no)
             obj.last_attempt_at = timezone.now()
             obj.save(update_fields=["last_attempt_at", "updated_at"])
 
             try:
-                # 1) Intento real (Siigo)
-                try_send_electronic_invoice(obj)
+                result = try_send_electronic_invoice(obj)
 
-                # 2) OK => eliminar (regla del outbox)
-                obj.delete()
-                ok += 1
+                # ✅ éxito si success=True y NO hay error explícito
+                success = True
+                err = None
+                if isinstance(result, dict):
+                    success = bool(result.get("success"))
+                    err = result.get("error") or result.get("errors") or result.get("message_error")
+
+                if success and not err:
+                    obj.delete()
+                    ok += 1
+                else:
+                    if err:
+                        obj.last_error = str(err)[:2000]
+                    obj.status = "PENDING"
+                    obj.save(update_fields=["last_error", "status", "updated_at"])
+                    fail += 1
 
             except IntegrityError:
-                # caso raro por unique_together (concurrencia). No debería pasar en reintento.
-                obj.last_error = "Conflicto de duplicado (unique_together). Recarga y revisa registros."
+                obj.last_error = "Conflicto de duplicado. Recarga y revisa registros."
                 obj.status = "PENDING"
                 obj.save(update_fields=["last_error", "status", "updated_at"])
                 fail += 1
 
             except Exception as e:
-                # Error => queda PENDING y registramos mensaje
-                obj.last_error = str(e).strip() or "Error desconocido"
+                obj.last_error = (str(e).strip() or "Error desconocido")[:2000]
                 obj.status = "PENDING"
                 obj.save(update_fields=["last_error", "status", "updated_at"])
                 fail += 1
@@ -126,28 +171,30 @@ class RatePlanAdmin(admin.ModelAdmin):
     search_fields = ("vehicle_type__name",)
     ordering = ("vehicle_type__name", "client_kind", "billing_unit", "day_type")
 
-
 @admin.register(Ticket)
 class TicketAdmin(admin.ModelAdmin):
     list_display = (
         "plate",
         "status",
-        "company",            # ✅ para ver si es empresa
-        "company_credit",     # ✅ indicador de si esa empresa tiene crédito
+        "company",
+        "company_credit",
         "vehicle_type",
         "client_kind_label",
         "rate_plan_label",
         "check_in",
         "check_out",
-        "total_amount_cop",
-        "get_closure_id",  # Agregado para ver rápido si ya se cerró
+        "parking_amount",
+        "work_amount",
+        "get_closure_id",
     )
-    # ✅ se agrega company para filtrar por empresa y ver asignados/pendientes
     list_filter = ("status", "vehicle_type", "client_kind", "company", "closure")
     search_fields = ("plate", "company__full_name", "company__id_number")
     ordering = ("-check_in",)
     date_hierarchy = "check_in"
 
+    # -----------------------------
+    # UI helpers (igual que ya tenías)
+    # -----------------------------
     @admin.display(description="Tipo cliente")
     def client_kind_label(self, obj: Ticket):
         try:
@@ -165,11 +212,20 @@ class TicketAdmin(admin.ModelAdmin):
                 return rp.label
             except Exception:
                 pass
-        # Fallback
         try:
             return str(rp)
         except Exception:
             return "Tarifa"
+
+    @admin.display(description="Parqueadero ($)")
+    def parking_amount(self, obj: Ticket):
+        value = int(getattr(obj, "parking_amount_cop", 0) or 0)
+        return f"{value:,.0f}"
+
+    @admin.display(description="Servicio ($)")
+    def work_amount(self, obj: Ticket):
+        value = int(getattr(obj, "work_amount_cop", 0) or 0)
+        return f"{value:,.0f}"
 
     @admin.display(description="Cierre #")
     def get_closure_id(self, obj: Ticket):
@@ -177,18 +233,111 @@ class TicketAdmin(admin.ModelAdmin):
 
     @admin.display(description="Crédito empresa", boolean=True)
     def company_credit(self, obj: Ticket):
-        """
-        ✅ Muestra si la empresa asociada tiene crédito habilitado.
-        Útil para validar rápido:
-          - ASSIGNED => True
-          - PENDING  => False
-        """
         if not obj.company_id:
             return False
         try:
             return bool(obj.company.credit_enabled)
         except Exception:
             return False
+
+    # =========================================================
+    # ✅ NÚCLEO: al guardar Ticket, sincroniza Payment + Closure
+    # =========================================================
+    def save_model(self, request, obj: Ticket, form, change):
+        """
+        Regla: Ticket es la fuente de verdad.
+        - Recalcula total_amount_cop cuando corresponde
+        - Sincroniza Payment asociado (si existe o si se debe crear)
+        - Recalcula total del Closure si el ticket pertenece a uno
+        """
+        with transaction.atomic():
+            super().save_model(request, obj, form, change)
+
+            # 1) Recalcular total si tiene sentido (tiene salida o ya no está ACTIVE)
+            #    - ACTIVE sin check_out: normalmente NO se congela aquí
+            #    - PAID/PENDING/ASSIGNED: debe existir total
+            should_recalc_total = bool(obj.check_out) or (obj.status in ("PAID", "PENDING", "ASSIGNED"))
+            if should_recalc_total:
+                end_time = obj.check_out or timezone.now()
+                try:
+                    new_total = int(estimate_amount_cop(obj, now=end_time) or 0)
+                except TypeError:
+                    # por si tu estimate_amount_cop usa firma estimate_amount_cop(ticket, now=...)
+                    new_total = int(estimate_amount_cop(obj, now=end_time) or 0)
+
+                if int(obj.total_amount_cop or 0) != new_total:
+                    Ticket.objects.filter(pk=obj.pk).update(total_amount_cop=new_total)
+                    obj.total_amount_cop = new_total  # mantener obj consistente en memoria
+
+            # 2) Sincronizar/crear Payment asociado cuando corresponda
+            #    - Si hay payment existente: ajusta amount
+            #    - Si no hay, lo crea SOLO si el ticket ya no es ACTIVE (o tiene check_out)
+            needs_payment = (obj.status in ("PAID", "PENDING", "ASSIGNED")) or bool(obj.check_out)
+            if needs_payment:
+                p = Payment.objects.filter(ticket=obj).first()
+
+                # método/estado coherente con tu lógica actual
+                if obj.status == "ASSIGNED":
+                    pay_method = "CREDIT"
+                    pay_status = "PENDING"
+                    pay_company = obj.company
+                elif obj.status == "PENDING":
+                    # PENDING “sin crédito” (pero ya existe Payment CREDIT en tu flujo)
+                    pay_method = "CREDIT"
+                    pay_status = "PENDING"
+                    pay_company = obj.company
+                else:
+                    # PAID: no tocamos method si ya existe, pero si no existe, lo dejamos CASH por defecto
+                    pay_method = getattr(p, "method", None) or "CASH"
+                    pay_status = "PAID"
+                    pay_company = None
+
+                if p:
+                    update_fields = []
+
+                    # amount siempre se alinea al total del ticket
+                    if int(p.amount_cop or 0) != int(obj.total_amount_cop or 0):
+                        p.amount_cop = int(obj.total_amount_cop or 0)
+                        update_fields.append("amount_cop")
+
+                    # status/method/company se alinean según estado del ticket
+                    if p.status != pay_status:
+                        p.status = pay_status
+                        update_fields.append("status")
+
+                    if p.method != pay_method:
+                        p.method = pay_method
+                        update_fields.append("method")
+
+                    if getattr(p, "company_id", None) != getattr(pay_company, "id", None):
+                        p.company = pay_company
+                        update_fields.append("company")
+
+                    if update_fields:
+                        p.save(update_fields=update_fields)
+                else:
+                    Payment.objects.create(
+                        ticket=obj,
+                        method=pay_method,
+                        status=pay_status,
+                        amount_cop=int(obj.total_amount_cop or 0),
+                        company=pay_company,
+                    )
+
+            # 3) Si el ticket está en un cierre, recalcular total del cierre
+            if obj.closure_id:
+                closure = Closure.objects.select_for_update().filter(pk=obj.closure_id).first()
+                if closure:
+                    total = 0
+                    for t in closure.tickets.all().only("total_amount_cop", "status"):
+                        if getattr(t, "status", "") == "PENDING":
+                            continue
+                        total += int(t.total_amount_cop or 0)
+                    if int(getattr(closure, "total_amount", 0) or 0) != int(total):
+                        closure.total_amount = int(total)
+                        closure.save(update_fields=["total_amount"])
+
+        messages.success(request, "Ticket actualizado y sincronizado (Payment / Closure).")
 
 
 @admin.register(Payment)

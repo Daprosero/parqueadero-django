@@ -186,14 +186,14 @@
       <div style="margin-top:6px;">
         <strong>Servicio actual:</strong>
         <span class="mono">
-          {% if ticket.work_type and ticket.work_type != "NONE" %}
-            {{ ticket.get_work_type_display }}
+          {% if ticket.service_type and ticket.service_type != "NONE" %}
+            {{ ticket.get_service_type_display }}
           {% else %}
             —
           {% endif %}
         </span>
         &nbsp;|&nbsp;
-        <strong>Valor actual:</strong> {{ ticket.work_amount_cop|default:0 }} COP
+        <strong>Valor actual:</strong> {{ ticket.service_amount_cop|default:0 }} COP
       </div>
 
       <div style="margin-top:6px;">

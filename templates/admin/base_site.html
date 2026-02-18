@@ -140,9 +140,16 @@
 
 {% block footer %}
 <div id="custom-admin-footer">
-  NIT 75.081.166-3 · Vía Termales frente a ACASA, BRR La Enea<br>
-  Tel: (606) 3122775300 · Manizales – Colombia<br>
-  parqueaderoloscambulos@gmail.com<br>
-  © {% now "Y" %} Parqueadero Los Cámbulos
+  {% if BUSINESS_INFO %}
+    NIT {{ BUSINESS_INFO.nit }} · {{ BUSINESS_INFO.address|default:"Vía Termales frente a ACASA, BRR La Enea" }}<br>
+    Celular: {{ BUSINESS_INFO.phone }} · {{ BUSINESS_INFO.city_country|default:"Manizales – Colombia" }}<br>
+    {{ BUSINESS_INFO.email }}<br>
+    © {% now "Y" %} {{ BUSINESS_INFO.name }}
+  {% else %}
+    NIT 75.081.166-3 · Vía Termales frente a ACASA, BRR La Enea<br>
+    Celular: 3122775300 · Manizales – Colombia<br>
+    parqueaderoloscambulos@gmail.com<br>
+    © {% now "Y" %} Parqueadero Los Cámbulos
+  {% endif %}
 </div>
 {% endblock %}
