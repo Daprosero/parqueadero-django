@@ -475,7 +475,7 @@ def closure_recalc(request, closure_id: int):
     return redirect(f"{reverse('parking:closure_edit_detail', kwargs={'closure_id': closure.id})}?from_recalc=1")
 
 #####Cambio####
-@staff_member_required
+@login_required(login_url="parking:login")
 def reprint_closure(request, closure_id):
     closure = get_object_or_404(Closure, id=closure_id)
     tickets_list = closure.tickets.all().select_related("payment")
@@ -981,6 +981,11 @@ def operator_panel(request):
                 ticket.company = None
 
                 ticket.save(update_fields=["check_out", "closed_by", "status", "company"])
+                # --- separar parqueadero vs servicio ---
+                total = int(getattr(ticket, "total_amount_cop", 0) or 0)
+                work  = int(getattr(ticket, "work_amount_cop", 0) or 0)
+                parking = max(0, total - work)
+
 
                 payment_obj, _ = Payment.objects.update_or_create(
                     ticket=ticket,
@@ -996,17 +1001,24 @@ def operator_panel(request):
                 )
 
                 # ✅ PREVIEW FACTURA ELECTRÓNICA (solo si invoice_required=True y customer existe)
+                # (solo si invoice_required=True y customer existe)
+                # ✅ FACTURA ELECTRÓNICA (solo si invoice_required=True y customer existe)
                 if invoice_required and customer:
+                    total = int(getattr(ticket, "total_amount_cop", 0) or 0)
+                    work  = int(getattr(ticket, "work_amount_cop", 0) or 0)
+                    parking = max(0, total - work)
+
                     emit_electronic_invoice_preview(
                         id_number=(getattr(customer, "id_number", "") or "").strip(),
                         full_name=(getattr(customer, "full_name", "") or "").strip(),
                         email=(getattr(customer, "email", "") or "").strip(),
                         items=[{
                             "plate": ticket.plate,
-                            "price": int(getattr(payment_obj, "amount_cop", 0) or 0),
+                            "parking": parking,
+                            "work": work,
+                            "work_type": ticket.work_type,  # property: code o NONE
                         }],
                     )
-
                 return redirect("parking:print_receipt", payment_id=payment_obj.id)
 
             # -------------------------
@@ -1053,6 +1065,10 @@ def operator_panel(request):
                     ticket.status = "PAID"
                     ticket.company = None
                     ticket.save()
+                    # --- separar parqueadero vs servicio ---
+                    total = int(getattr(ticket, "total_amount_cop", 0) or 0)
+                    work  = int(getattr(ticket, "work_amount_cop", 0) or 0)
+                    parking = max(0, total - work)
 
                     payment_obj, _ = Payment.objects.update_or_create(
                         ticket=ticket,
@@ -1067,6 +1083,7 @@ def operator_panel(request):
                         }
                     )
 
+                    # ✅ FACTURA ELECTRÓNICA
                     if invoice_required and customer:
                         emit_electronic_invoice_preview(
                             id_number=(getattr(customer, "id_number", "") or "").strip(),
@@ -1074,7 +1091,9 @@ def operator_panel(request):
                             email=(getattr(customer, "email", "") or "").strip(),
                             items=[{
                                 "plate": ticket.plate,
-                                "price": int(getattr(payment_obj, "amount_cop", 0) or 0),
+                                "parking": parking,
+                                "work": work,
+                                "work_type": ticket.work_type,  # property => code / NONE
                             }],
                         )
 
@@ -1139,15 +1158,21 @@ def operator_panel(request):
 
     # SIDEBAR
     # ✅ AJUSTE: global (sin created_by)
-    last_transactions = list(
+    last_transactions_candidates = list(
         Ticket.objects.filter(closure__isnull=True)
         .select_related("vehicle_type")
         .annotate(last_dt=Coalesce("check_out", "check_in"))
-        .order_by("-last_dt")[:3]
+        .order_by("-last_dt")[:10]
     )
-    pay_map = {p.ticket_id: p for p in Payment.objects.filter(ticket_id__in=[t.id for t in last_transactions])}
 
-    for t in last_transactions:
+    # 2) payments para esos candidatos (botón recibo)
+    pay_map = {
+        p.ticket_id: p
+        for p in Payment.objects.filter(ticket_id__in=[t.id for t in last_transactions_candidates])
+    }
+
+    # 3) Enriquecer candidatos (UI)
+    for t in last_transactions_candidates:
         flag = ticket_has_service(t)
         t._has_service_ui = flag
         t.has_service_ui = flag
@@ -1166,6 +1191,43 @@ def operator_panel(request):
         t.parking_amount_ui = fmt_cop(parking_amt)
         t.service_text_ui = s_txt
         t.service_amount_ui = fmt_cop(s_amt)
+
+        p = pay_map.get(t.id)
+        t.payment_id_ui = p.id if p else None
+
+    # 4) Último cierre
+    last_closure = (
+        Closure.objects
+        .order_by("-date")
+        .only("id", "date")
+        .first()
+    )
+
+    # 5) Lista única “transaccional” (tickets + cierre)
+    sidebar_last_items = []
+
+    for t in last_transactions_candidates:
+        dt = getattr(t, "last_dt", None) or getattr(t, "check_out", None) or getattr(t, "check_in", None)
+        sidebar_last_items.append({
+            "kind": "ticket",
+            "dt": dt,
+            "ticket": t,
+        })
+
+    if last_closure and getattr(last_closure, "date", None):
+        sidebar_last_items.append({
+            "kind": "closure",
+            "dt": last_closure.date,
+            "closure": last_closure,
+        })
+
+    # 6) Ordenar por fecha DESC y recortar a 3
+    sidebar_last_items.sort(key=lambda x: x["dt"] or timezone.now(), reverse=True)
+    sidebar_last_items = sidebar_last_items[:3]
+
+    # 7) Compatibilidad: last_transactions = solo los tickets que quedaron en el top 3
+    last_transactions = [it["ticket"] for it in sidebar_last_items if it.get("kind") == "ticket"]
+
 
     # pendientes (solo PENDING, sin cierre) ✅ global
     pending_tickets = list(
@@ -1212,7 +1274,13 @@ def operator_panel(request):
         "inspect_form": inspect_form,
         "amount": amount,
         "inspect_info": inspect_info,
+
+        # ✅ nuevo: lista mezclada que sí “cuenta” el cierre dentro de las 3
+        "sidebar_last_items": sidebar_last_items,
+
+        # ✅ se mantiene por compatibilidad (pero ya NO es el “top 3 real mezclado”)
         "last_transactions": last_transactions,
+
         "pending_tickets": pending_tickets,
         "paid_tickets": paid_tickets,
         "paid_payments_by_ticket_id": paid_payments_by_ticket_id,
@@ -1222,9 +1290,13 @@ def operator_panel(request):
         "pending_count": pending_count,
         "active_count": active_count,
 
+        # ✅ se mantiene, por si lo usas en otro lado
+        "last_closure": last_closure,
+
         "open_tickets": open_tickets,
         "is_admin": is_admin,
     })
+
 
 
 
@@ -1917,12 +1989,20 @@ def gestion(request):
                         except Exception:
                             co = str(t.check_out) if t.check_out else ""
 
+                        t_total = int(getattr(t, "total_amount_cop", 0) or 0)
+                        t_work  = int(getattr(t, "work_amount_cop", 0) or 0)
+                        t_park  = max(0, t_total - t_work)
+
                         receipt_tickets.append({
                             "id": t.id,
                             "plate": (t.plate or ""),
                             "check_in": ci,
                             "check_out": co,
-                            "total": t_total,
+                            "total": int(t_total),
+
+                            "parking_amount": int(t_park),
+                            "work_amount": int(t_work),
+                            "work_type": (getattr(t, "work_type", "NONE") or "NONE").strip().upper(),
                         })
 
                 # ✅ Guardar recibo en SESSION (sin modelo nuevo)
@@ -1963,9 +2043,14 @@ def gestion(request):
                         full_name=(getattr(company, "full_name", "") or "").strip(),
                         email=(getattr(company, "email", "") or "").strip(),
                         items=[
-                            {"plate": x["plate"], "price": int(x["total"] or 0)}
-                            for x in (receipt_tickets or [])
-                        ],
+                                {
+                                    "plate": x.get("plate", ""),
+                                    "parking": int(x.get("parking_amount", 0) or 0),
+                                    "work": int(x.get("work_amount", 0) or 0),
+                                    "work_type": (x.get("work_type") or "NONE").strip().upper(),
+                                }
+                                for x in (receipt_tickets or [])
+                            ],
                     )
 
 
@@ -2218,10 +2303,11 @@ def monthly_charge(request, pk: int):
                 email=(getattr(customer, "email", "") or email).strip(),
                 items=[{
                     "plate": obj.plate,  # MonthlyPlate
-                    "price": int(getattr(p, "amount_cop", 0) or 0),
+                    "parking": int(getattr(p, "amount_cop", 0) or 0),
+                    "work": 0,
+                    "work_type": "NONE",  # mensual no tiene servicio
                 }],
             )
-
 
     except Exception as e:
         print("❌ ERROR creando Payment en monthly_charge:", repr(e))
@@ -2357,9 +2443,34 @@ def active_vehicles_report(request):
 
     finish_url = menu_url
 
-    # 🔒 NO generar reporte si no hay activos
-    if active_count == 0:
-        messages.info(request, "No hay vehículos activos para imprimir.")
+    # ============================
+    # ✅ Mensuales (desconectados del ticket)
+    # ============================
+    def _norm_plate(p: str) -> str:
+        return (p or "").strip().upper().replace(" ", "").replace("-", "")
+
+    monthly_qs = MonthlyPlate.objects.all().order_by("plate")  # o .filter(active=True) si aplica
+    monthly_plates = list(monthly_qs)
+    monthly_set = {_norm_plate(mp.plate) for mp in monthly_plates if mp.plate}
+    monthly_count = len(monthly_plates)
+
+    # ============================
+    # ✅ Separar activos: mensuales vs habituales (por placa)
+    # ============================
+    monthly_tickets = []
+    habitual_tickets = []
+
+    for t in qs:
+        plate_norm = _norm_plate(getattr(t, "plate", ""))
+        if plate_norm and plate_norm in monthly_set:
+            monthly_tickets.append(t)
+        else:
+            habitual_tickets.append(t)
+
+    # ✅ Ajuste solicitado:
+    # NO bloquear si no hay ACTIVE, siempre que existan mensuales registrados
+    if active_count == 0 and monthly_count == 0:
+        messages.info(request, "No hay vehículos activos ni placas mensuales registradas para imprimir.")
         return redirect(finish_url)
 
     # ✅ GENERAR CONSECUTIVO REAL
@@ -2371,18 +2482,28 @@ def active_vehicles_report(request):
 
     report = ActiveVehiclesReport.objects.create(
         consecutive=new_consecutive,
-        active_count=active_count,
+        active_count=active_count,  # (activos reales, no incluye mensuales “registrados”)
     )
 
     return render(
         request,
         "parking/active_vehicles_report.html",
         {
+            # ✅ Activos reales
             "active_tickets": qs,
             "active_count": active_count,
+
+            # ✅ Activos separados por tipo
+            "habitual_tickets": habitual_tickets,
+            "monthly_tickets": monthly_tickets,
+
+            # ✅ Mensuales registrados (aunque no estén como ACTIVE)
+            "monthly_plates": monthly_plates,
+            "monthly_count": monthly_count,
+
             "now": timezone.now(),
             "finish_url": finish_url,
-            "report_id": report.consecutive,  # 👈 formato bonito 00001
+            "report_id": report.consecutive,
         },
     )
 
@@ -2533,34 +2654,158 @@ def admin_dashboard_data(request):
 
 @staff_member_required
 def einvoices_outbox(request):
-    pending_invoices = ElectronicInvoiceOutbox.objects.filter(status="PENDING").order_by("-created_at")
+    invoices = ElectronicInvoiceOutbox.objects.all().order_by("-created_at")
     return render(request, "parking/einvoices_outbox.html", {
-        "pending_invoices": pending_invoices
+        "pending_invoices": invoices,
     })
+
+
+# views.py
+from django.contrib import messages
+from django.contrib.admin.views.decorators import staff_member_required
+from django.db import transaction
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+
+from .models import ElectronicInvoiceOutbox, WorkType
+from .forms import EInvoiceOutboxForm, EInvoiceItemFormSet
+
+JSON_FIELD = "items"  # 👈 CAMBIA por el nombre real del campo JSON en ElectronicInvoiceOutbox
+
+
+def _items_from_inv(inv):
+    val = getattr(inv, JSON_FIELD, None)
+    return val if isinstance(val, list) else []
+
+
+def _items_to_initial(items_list):
+    """
+    Convierte [{"work_type":"DESEMBARILLADO", ...}, ...]
+    a initial para el formset, resolviendo WorkType por code.
+    """
+    initials = []
+    for it in (items_list or []):
+        code = (it.get("work_type") or "NONE").strip().upper()
+
+        wt_obj = None
+        if code and code != "NONE":
+            wt_obj = WorkType.objects.filter(active=True, code__iexact=code).first()
+
+        initials.append({
+            "plate": (it.get("plate") or "").strip().upper(),
+            "work_type": wt_obj,  # ModelChoiceField espera objeto o None
+            "parking": int(it.get("parking") or 0),
+            "work": int(it.get("work") or 0),
+        })
+    return initials
+
+from .models import ElectronicInvoiceOutbox, WorkType
+from .forms import EInvoiceOutboxForm, EInvoiceItemFormSet
 
 
 @staff_member_required
 def einvoice_edit(request, pk):
-    inv = get_object_or_404(ElectronicInvoiceOutbox, pk=pk, status="PENDING")
+    inv = get_object_or_404(ElectronicInvoiceOutbox, pk=pk)
     nxt = _safe_next(request, request.GET.get("next"))
+
+    # ===== helpers =====
+    def build_initial(items_json):
+        initial = []
+        for it in (items_json or []):
+            if not isinstance(it, dict):
+                continue
+
+            plate = (it.get("plate") or "").strip().upper()
+            if not plate:
+                continue
+
+            parking = int(it.get("parking") or 0)
+            work = int(it.get("work") or 0)
+
+            wt_code = (it.get("work_type") or "NONE").strip().upper() or "NONE"
+            wt_obj = None
+            if wt_code != "NONE":
+                wt_obj = WorkType.objects.filter(code__iexact=wt_code, active=True).first()
+
+            initial.append({
+                "plate": plate,
+                "work_type": wt_obj,   # ModelChoiceField espera instancia
+                "parking": parking,
+                "work": work,
+            })
+        return initial
 
     if request.method == "POST":
         form = EInvoiceOutboxForm(request.POST, instance=inv)
-        if form.is_valid():
-            form.save()
-            messages.success(request, "Registro actualizado.")
-            return redirect(nxt or reverse("parking:einvoices_outbox"))
-        messages.error(request, "Revisa los campos marcados.")
+        items_formset = EInvoiceItemFormSet(request.POST, prefix="items")
+
+        form_valid = form.is_valid()
+        formset_valid = items_formset.is_valid()
+
+        print("FORM ERRORS:", form.errors)
+        print("FORMSET ERRORS:", items_formset.errors)
+        print("FORMSET NON FORM ERRORS:", items_formset.non_form_errors())
+
+        if form_valid and formset_valid:
+            # construir items_out desde el formset
+            items_out = []
+            for f in items_formset:
+                cd = getattr(f, "cleaned_data", None) or {}
+                if not cd:
+                    continue
+                if cd.get("DELETE"):
+                    continue
+
+                plate = (cd.get("plate") or "").strip().upper()
+
+                wt_obj = cd.get("work_type")  # WorkType o None
+                wt_code = "NONE"
+                if wt_obj:
+                    wt_code = (getattr(wt_obj, "code", "") or "").strip().upper() or "NONE"
+
+                parking = int(cd.get("parking") or 0)
+                work = int(cd.get("work") or 0)
+
+                items_out.append({
+                    "plate": plate,
+                    "work_type": wt_code,
+                    "parking": parking,
+                    "work": work,
+                })
+
+            try:
+                with transaction.atomic():
+                    # NO uses form.save() directo (porque llama save() y full_clean)
+                    # Mejor: asigna y guarda una sola vez al final.
+                    inv.id_number = (form.cleaned_data.get("id_number") or "").strip()
+                    inv.full_name = (form.cleaned_data.get("full_name") or "").strip()
+                    inv.email = (form.cleaned_data.get("email") or "").strip()
+
+                    # 🔥 lo importante
+                    inv.items = items_out
+
+                    # ✅ que el modelo calcule total/hash y valide todo
+                    inv.save()
+
+                messages.success(request, "Registro actualizado.")
+                return redirect(nxt or reverse("parking:einvoices_outbox"))
+
+            except ValidationError as e:
+                # Esto te mostrará por qué no guardó (items vacíos, total 0, etc.)
+                form.add_error(None, e)
+                messages.error(request, "No se pudo guardar. Revisa los errores.")
+        else:
+            messages.error(request, "Revisa los campos marcados.")
     else:
         form = EInvoiceOutboxForm(instance=inv)
+        items_formset = EInvoiceItemFormSet(initial=build_initial(inv.items), prefix="items")
 
     return render(request, "parking/einvoice_edit.html", {
         "inv": inv,
         "form": form,
-        "next": nxt,  # para mantener tu template igual
+        "items_formset": items_formset,
+        "next": nxt,
     })
-
-
 @staff_member_required
 def einvoice_delete(request, pk):
     inv = get_object_or_404(ElectronicInvoiceOutbox, pk=pk)
@@ -2571,51 +2816,56 @@ def einvoice_delete(request, pk):
         messages.success(request, "Registro eliminado.")
         return redirect(nxt or reverse("parking:einvoices_outbox"))
 
-    # si prefieres no tener confirm template, puedes eliminar directo en POST desde el botón
     messages.error(request, "Método no permitido.")
     return redirect(nxt or reverse("parking:einvoices_outbox"))
 
 
 @staff_member_required
 def einvoice_retry(request, pk):
-    inv = get_object_or_404(ElectronicInvoiceOutbox, pk=pk, status="PENDING")
+    inv = get_object_or_404(ElectronicInvoiceOutbox, pk=pk)
     nxt = _safe_next(request, request.GET.get("next"))
 
     if request.method != "POST":
         messages.error(request, "Método no permitido.")
         return redirect(nxt or reverse("parking:einvoices_outbox"))
 
-    # ✅ registra intento (aunque falle)
+    # marca intento (opcional, emit también lo marca)
     inv.last_attempt_at = timezone.now()
     inv.save(update_fields=["last_attempt_at"])
 
     try:
         result = emit_electronic_invoice_preview(
+            outbox_pk=inv.pk,              # ✅ clave: actualiza ESTE MISMO registro
             id_number=inv.id_number,
             full_name=inv.full_name,
             email=inv.email,
-            items=list(inv.items or []),   # ✅ CAMBIO CLAVE
+            items=list(inv.items or []),
         )
 
-        # ✅ NUEVA REGLA: si no hay excepción, asumimos éxito,
-        # salvo que el retorno indique explícitamente un error.
-        err = None
-        if isinstance(result, dict):
-            err = result.get("error") or result.get("errors") or result.get("message_error")
+        # ✅ recarga lo que realmente quedó en BD (status / last_error)
+        inv.refresh_from_db()
 
-        if err:
-            inv.last_error = str(err)[:2000]
-            inv.save(update_fields=["last_error"])
-            messages.error(request, f"No se pudo enviar: {err}")
+        if inv.status == "SENT":
+            messages.success(request, "Factura enviada exitosamente (marcada como Enviada).")
+        elif inv.status == "ERROR":
+            messages.error(request, f"No se pudo enviar: {inv.last_error or 'Error no especificado'}")
         else:
-            inv.delete()
-            messages.success(request, "Factura enviada exitosamente. El registro pendiente fue eliminado.")
+            # si por alguna razón queda PENDING
+            err = None
+            if isinstance(result, dict):
+                err = result.get("error") or result.get("errors") or result.get("message_error")
+            if err:
+                messages.error(request, f"No se pudo enviar: {err}")
+            else:
+                messages.warning(request, "El envío terminó sin error explícito, pero el estado quedó Pendiente. Revisa logs/Siigo.")
 
         return redirect(nxt or reverse("parking:einvoices_outbox"))
 
     except Exception as e:
+        # si emit explotó antes de poder guardar estado
+        inv.status = "ERROR"
         inv.last_error = str(e)[:2000]
-        inv.save(update_fields=["last_error"])
+        inv.save(update_fields=["status", "last_error"])
         messages.error(request, f"No se pudo enviar: {e}")
         return redirect(nxt or reverse("parking:einvoices_outbox"))
 
@@ -2623,41 +2873,43 @@ def einvoice_retry(request, pk):
 @staff_member_required
 def einvoices_retry_all(request):
     nxt = _safe_next(request, request.GET.get("next"))
-    qs = ElectronicInvoiceOutbox.objects.filter(status="PENDING").order_by("created_at")
+
+    if request.method != "POST":
+        messages.error(request, "Método no permitido.")
+        return redirect(nxt or reverse("parking:einvoices_outbox"))
+
+    # ✅ reintenta lo reintentable: PENDING y ERROR (NO SENT)
+    qs = (ElectronicInvoiceOutbox.objects
+          .filter(status__in=["PENDING", "ERROR"])
+          .order_by("created_at"))
 
     ok, fail = 0, 0
     now = timezone.now()
-
-    # (opcional) marca intento masivo de una vez
     qs.update(last_attempt_at=now)
 
     for inv in qs:
         try:
-            result = emit_electronic_invoice_preview(
+            emit_electronic_invoice_preview(
+                outbox_pk=inv.pk,          # ✅ actualiza el mismo registro
                 id_number=inv.id_number,
                 full_name=inv.full_name,
                 email=inv.email,
-                items=list(inv.items or []),   # ✅ CAMBIO CLAVE
+                items=list(inv.items or []),
             )
 
-
-            # ✅ NUEVA REGLA: éxito si no hay excepción,
-            # salvo que el retorno indique explícitamente un error.
-            err = None
-            if isinstance(result, dict):
-                err = result.get("error") or result.get("errors") or result.get("message_error")
-
-            if err:
-                inv.last_error = str(err)[:2000]
-                inv.save(update_fields=["last_error"])
+            inv.refresh_from_db()
+            if inv.status == "SENT":
+                ok += 1
+            elif inv.status == "ERROR":
                 fail += 1
             else:
-                inv.delete()
-                ok += 1
+                # quedó PENDING sin error explícito
+                fail += 1
 
         except Exception as e:
+            inv.status = "ERROR"
             inv.last_error = str(e)[:2000]
-            inv.save(update_fields=["last_error"])
+            inv.save(update_fields=["status", "last_error"])
             fail += 1
 
     messages.success(request, f"Reintentos finalizados. OK: {ok} | Error: {fail}")

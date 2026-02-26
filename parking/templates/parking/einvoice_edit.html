@@ -1,67 +1,168 @@
+{# templates/parking/einvoice_edit.html #}
 {% extends "parking/base.html" %}
+{% load humanize %}
 
 {% block title %}Editar factura pendiente{% endblock %}
 
 {% block content %}
-<style>
-  html, body { background-color:#f3f4f6 !important; }
 
-  .sheet{
-    max-width: 980px;
-    margin: 0 auto;
-    background:#fff;
-    border:1px solid #e5e7eb;
-    border-radius:12px;
-    box-shadow:0 1px 3px rgba(0,0,0,.10),0 1px 2px rgba(0,0,0,.06);
-    padding: 18px 20px;
+<style>
+  html, body { background-color: #f3f4f6 !important; }
+
+  body:has(.dash-scope) main,
+  body:has(.dash-scope) .container,
+  body:has(.dash-scope) .container-fluid,
+  body:has(.dash-scope) .content,
+  body:has(.dash-scope) .content-wrapper,
+  body:has(.dash-scope) .page-content{
+    background: transparent !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    padding-bottom: 0 !important;
+    margin-bottom: 0 !important;
   }
 
-  .topbar{
+  .dash-scope{
+    --d-bg:#f3f4f6;
+    --d-sheet:#ffffff;
+    --d-muted:#6b7280;
+    --d-border:#e5e7eb;
+    --d-dark:#1f2937;
+    --d-radius:12px;
+    --d-shadow:0 1px 3px rgba(0,0,0,.10),0 1px 2px rgba(0,0,0,.06);
+
+    background:var(--d-bg);
+    position:relative;
+    left:50%;
+    transform:translateX(-50%);
+    width:100vw;
+    overflow-x:clip;
+
+    margin-top:-62px;
+    padding:1rem;
+    padding-bottom:0;
+  }
+
+  .dashboard-sheet{
+    background:var(--d-sheet);
+    border-radius:var(--d-radius);
+    box-shadow:var(--d-shadow);
+    padding:1.25rem 1.75rem;
+    max-width:1920px;
+    margin:0 auto;
+    display:flex;
+    flex-direction:column;
+    gap:1.25rem;
+  }
+
+  .header-row{
     display:flex;
     justify-content:space-between;
     align-items:center;
-    gap:12px;
+    border-bottom:1px solid var(--d-border);
+    padding-bottom:1rem;
+    gap:1rem;
     flex-wrap:wrap;
-    border-bottom:1px solid #e5e7eb;
-    padding-bottom:12px;
-    margin-bottom:14px;
   }
 
-  .title h2{
+  .header-title h2{
     margin:0;
-    font-size:1.25rem;
-    font-weight:900;
-    color:#111827;
+    font-size:1.5rem;
+    font-weight:800;
+    color:var(--d-dark);
   }
 
-  .title p{
-    margin:4px 0 0;
-    color:#6b7280;
-    font-size:.92rem;
+  .header-title p{
+    margin:.25rem 0 0;
+    color:var(--d-muted);
   }
 
-  .btn{
+  .btn-dash{
     display:inline-flex;
     align-items:center;
-    justify-content:center;
     height:36px;
-    padding:0 14px;
-    border-radius:999px;
+    padding:0 .9rem;
+    border-radius:10px;
     font-weight:800;
-    border:1px solid #e5e7eb;
+    border:1px solid var(--d-border);
     background:#fff;
-    color:#111827;
+    color:var(--d-dark);
     text-decoration:none;
-    transition:.15s;
+    transition:.18s;
     white-space:nowrap;
+    cursor:pointer;
   }
-  .btn:hover{ background:#f9fafb; transform:translateY(-1px); }
-
-  .btn-primary{
-    border-color:#2563eb;
-    color:#2563eb;
+  .btn-dash:hover{
+    background:#f9fafb;
+    transform:translateY(-1px);
   }
 
+  .panel{
+    border:1px solid var(--d-border);
+    border-radius:12px;
+    background:#fff;
+    overflow:hidden;
+  }
+
+  .panel-head{
+    padding:12px 16px;
+    background:#f8f9fa;
+    font-weight:900;
+    color:var(--d-muted);
+    border-bottom:1px solid #f1f4f8;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+
+  .panel-body{
+    padding:16px;
+  }
+
+  .err-box{
+    margin-top:6px;
+    font-size:.8rem;
+    color:#8a2b2b;
+    background:#fff0f0;
+    border:1px solid #ffd9d9;
+    padding:6px 8px;
+    border-radius:8px;
+    line-height:1.25;
+  }
+
+  .mono{
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  .back-to-menu{
+    display:inline-flex;
+    width:fit-content;
+    align-self:flex-start;
+    align-items:center;
+    gap:0.5rem;
+    font-weight:900;
+    font-size:0.9rem;
+    color:var(--d-muted);
+    text-decoration:none;
+    padding:0.25rem 0.4rem;
+    border-radius:8px;
+    border:1px solid transparent;
+    transition:0.2s;
+  }
+  .back-to-menu:hover{
+    color:var(--d-dark);
+    background:#f9fafb;
+    border-color:var(--d-border);
+    transform:translateY(-1px);
+  }
+  .back-to-menu .arrow{
+    font-size:1.05rem;
+    line-height:1;
+  }
+
+  /* ===== Form layout ===== */
   .grid{
     display:grid;
     grid-template-columns: 1fr 1fr;
@@ -75,89 +176,486 @@
     display:block;
     font-weight:900;
     margin-bottom:6px;
-    color:#111827;
+    color:var(--d-dark);
     font-size:.92rem;
   }
 
   .field input, .field select, .field textarea{
     width:100%;
-    border:1px solid #e5e7eb;
-    border-radius:10px;
+    border:1px solid var(--d-border);
+    border-radius:12px;
     padding:10px 12px;
     font-size:.95rem;
     background:#fff;
     outline:none;
+    box-sizing:border-box;
   }
 
-  .field textarea{ min-height: 110px; }
-
-  .errors{
-    margin: 10px 0 0;
-    padding: 10px 12px;
-    background:#fff0f0;
-    border:1px solid #ffd9d9;
-    border-radius:10px;
-    color:#7f1d1d;
+  .muted{
+    color:var(--d-muted);
     font-size:.9rem;
+    margin-top:6px;
   }
 
-  .actions{
+  .pill{
+    display:inline-flex;
+    align-items:center;
+    height:26px;
+    padding:0 10px;
+    border-radius:999px;
+    font-weight:900;
+    background:#eef2ff;
+    border:1px solid #c7d2fe;
+    color:#3730a3;
+    font-size:.82rem;
+    margin-left:6px;
+  }
+
+  /* ✅ Placa siempre en mayúsculas (visual) */
+  input[name$="-plate"]{ text-transform: uppercase; }
+
+  /* ✅ (opcional) oculta filas eliminadas cuando no hay checkbox DELETE */
+  .hide{ display:none !important; }
+
+  /* ===== Table (matching outbox style) ===== */
+  .table-scroll{
+    overflow:auto;
+    border-top:1px solid var(--d-border);
+  }
+
+  table.simple{
+    width:100%;
+    border-collapse:separate;
+    border-spacing:0;
+    min-width: 980px;
+  }
+
+  table.simple thead th{
+    position:sticky;
+    top:0;
+    background:#fff;
+    z-index:2;
+    text-align:left;
+    padding:12px 12px;
+    font-weight:900;
+    color:var(--d-dark);
+    border-bottom:1px solid var(--d-border);
+    white-space:nowrap;
+  }
+
+  table.simple tbody td{
+    padding:12px 12px;
+    border-bottom:1px solid #f1f4f8;
+    vertical-align:middle;
+  }
+  table.simple tbody tr:last-child td{ border-bottom:none; }
+
+  table.simple td input,
+  table.simple td select{
+    width:100%;
+    min-width: 140px;
+    border:1px solid var(--d-border);
+    border-radius:12px;
+    padding:10px 12px;
+    background:#fff;
+    box-sizing:border-box;
+  }
+
+  table.simple td select{ min-width: 240px; }
+  table.simple td input[type="number"]{ min-width: 170px; }
+  table.simple td input[type="text"]{ min-width: 160px; }
+
+  .row-actions{
     display:flex;
-    gap:10px;
+    gap:8px;
     justify-content:flex-end;
-    margin-top:14px;
+    flex-wrap:nowrap;
+    align-items:center;
+  }
+
+  .action-btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    height:32px;
+    padding:0 12px;
+    gap:6px;
+    font-size:.85rem;
+    font-weight:900;
+    line-height:1;
+    border-radius:999px;
+    cursor:pointer;
+    white-space:nowrap;
+    text-decoration:none;
+    background:#fff;
+    border:1px solid var(--d-border);
+    appearance:none;
+    -webkit-appearance:none;
+    transition:all .15s ease;
+  }
+
+  .action-btn:hover{
+    background:#f9fafb;
+    transform:translateY(-1px);
+  }
+
+  .action-btn.btn-outline{
+    border-color:#2563eb;
+    color:#2563eb;
+  }
+
+  .action-btn.btn-danger-outline{
+    border-color:#fca5a5;
+    color:#dc2626;
+  }
+  .action-btn.btn-danger-outline:hover{
+    background:#fef2f2;
+    border-color:#f87171;
+  }
+
+  .totalbar{
+    display:flex;
+    justify-content:flex-end;
+    gap:10px;
+    padding:12px 16px;
+    background:#f8f9fa;
+    border-top:1px solid var(--d-border);
+    font-weight:900;
+    color:var(--d-dark);
+  }
+
+  .actions-bottom{
+    display:flex;
+    justify-content:flex-end;
+    padding:14px 16px 16px;
+    border-top:1px solid var(--d-border);
+    gap:10px;
     flex-wrap:wrap;
   }
 </style>
 
-<div class="sheet">
-  <div class="topbar">
-    <div class="title">
-      <h2>Editar factura pendiente</h2>
-      <p>{{ inv.full_name }} — {{ inv.id_number }}</p>
+<div class="dash-scope">
+  <div class="dashboard-sheet">
+
+    <a class="back-to-menu" href="{{ next|default:'{% url "parking:einvoices_outbox" %}' }}">
+      <span class="arrow">←</span>
+      <span>Volver</span>
+    </a>
+
+    <div class="header-row">
+      <div class="header-title">
+        <h2>Editar factura pendiente</h2>
+        <p>{{ inv.full_name }} — {{ inv.id_number }}</p>
+      </div>
+
+      <a class="btn-dash" href="{{ next|default:'{% url "parking:einvoices_outbox" %}' }}">
+        ← Volver
+      </a>
     </div>
 
-    <a class="btn" href="{{ next|default:'{% url "parking:einvoices_outbox" %}' }}">← Volver</a>
+    <form method="post" class="panel">
+      {% csrf_token %}
+
+      <div class="panel-head">
+        <span>DATOS DE FACTURA</span>
+      </div>
+
+      <div class="panel-body">
+        {% if form.non_field_errors %}
+          <div class="err-box">{{ form.non_field_errors }}</div>
+        {% endif %}
+
+        <div class="grid">
+          <div class="field">
+            <label>Identificación</label>
+            {{ form.id_number }}
+            {% if form.id_number.errors %}<div class="err-box">{{ form.id_number.errors }}</div>{% endif %}
+          </div>
+
+          <div class="field">
+            <label>Cliente</label>
+            {{ form.full_name }}
+            {% if form.full_name.errors %}<div class="err-box">{{ form.full_name.errors }}</div>{% endif %}
+          </div>
+
+          <div class="field">
+            <label>Correo</label>
+            {{ form.email }}
+            {% if form.email.errors %}<div class="err-box">{{ form.email.errors }}</div>{% endif %}
+          </div>
+
+          <div class="field">
+            <label>Total (COP) <span class="pill">calculado</span></label>
+            <input id="total_amount_display" type="text" class="mono"
+                   value="{{ inv.total_amount_cop|intcomma }}" readonly>
+            <div class="muted">Este valor se recalcula con el detalle (items).</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-head">
+        <span>DETALLE (ITEMS)</span>
+        <button type="button" class="action-btn btn-outline" id="addItemBtn">+ Agregar item</button>
+      </div>
+
+      {% if items_formset %}
+        {{ items_formset.management_form }}
+
+        {% if items_formset.non_form_errors %}
+          <div class="panel-body">
+            <div class="err-box">{{ items_formset.non_form_errors }}</div>
+          </div>
+        {% endif %}
+
+        <div class="table-scroll">
+          <table class="simple" id="itemsTable">
+            <thead>
+              <tr>
+                <th style="width:160px;">Placa</th>
+                <th style="width:340px;">Tipo trabajo</th>
+                <th style="width:190px;">Parqueo</th>
+                <th style="width:190px;">Trabajo</th>
+                <th style="text-align:right; width:210px;">Acción</th>
+              </tr>
+            </thead>
+
+            <tbody id="itemsTbody">
+              {% for f in items_formset.forms %}
+                <tr class="item-row">
+                  <td>
+                    {{ f.plate }}
+                    {% if f.plate.errors %}<div class="err-box">{{ f.plate.errors }}</div>{% endif %}
+                  </td>
+
+                  <td>
+                    {{ f.work_type }}
+                    {% if f.work_type.errors %}<div class="err-box">{{ f.work_type.errors }}</div>{% endif %}
+                  </td>
+
+                  <td>
+                    {{ f.parking }}
+                    {% if f.parking.errors %}<div class="err-box">{{ f.parking.errors }}</div>{% endif %}
+                  </td>
+
+                  <td>
+                    {{ f.work }}
+                    {% if f.work.errors %}<div class="err-box">{{ f.work.errors }}</div>{% endif %}
+                  </td>
+
+                  <td>
+                    <div class="row-actions">
+                      {% if f.DELETE %}
+                        <label class="mono" style="display:inline-flex; align-items:center; gap:8px;">
+                          {{ f.DELETE }} <span class="muted" style="margin:0;">Eliminar</span>
+                        </label>
+                      {% else %}
+                        <button type="button" class="action-btn btn-danger-outline js-remove">🗑️ Quitar</button>
+                      {% endif %}
+                    </div>
+                  </td>
+
+                  {# ✅ Si algún día cambias a inline formset, aquí iría {{ f.id }} #}
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="totalbar">
+          <span>Total calculado:</span>
+          <span id="calcTotal" class="mono">{{ inv.total_amount_cop|intcomma }}</span>
+        </div>
+
+        <div class="actions-bottom">
+          <button type="submit" class="btn-dash" style="border-color:#2563eb;color:#2563eb;font-weight:900;">
+            💾 Guardar
+          </button>
+        </div>
+
+        {# Template para agregar filas: usa empty_form del formset (prefix __prefix__) #}
+        <template id="emptyFormTpl">
+          <tr class="item-row">
+            <td>__PLATE__</td>
+            <td>__WT__</td>
+            <td>__PARK__</td>
+            <td>__WORK__</td>
+            <td>
+              <div class="row-actions">__DEL__</div>
+            </td>
+          </tr>
+        </template>
+
+        <div style="display:none" id="emptyFormFields">
+          <div data-plate>{{ items_formset.empty_form.plate }}</div>
+          <div data-wt>{{ items_formset.empty_form.work_type }}</div>
+          <div data-park>{{ items_formset.empty_form.parking }}</div>
+          <div data-work>{{ items_formset.empty_form.work }}</div>
+          <div data-del>
+            {% if items_formset.empty_form.DELETE %}
+              <label class="mono" style="display:inline-flex; align-items:center; gap:8px;">
+                {{ items_formset.empty_form.DELETE }} <span class="muted" style="margin:0;">Eliminar</span>
+              </label>
+            {% else %}
+              <button type="button" class="action-btn btn-danger-outline js-remove">🗑️ Quitar</button>
+            {% endif %}
+          </div>
+        </div>
+
+      {% else %}
+        <div class="panel-body">
+          <div class="err-box">
+            No llegó <b>items_formset</b> al template. Ajusta la vista para enviar el formset de items.
+          </div>
+        </div>
+        <div class="actions-bottom">
+          <button type="submit" class="btn-dash" style="border-color:#2563eb;color:#2563eb;font-weight:900;">
+            💾 Guardar
+          </button>
+        </div>
+      {% endif %}
+
+    </form>
   </div>
-
-  <form method="post">
-    {% csrf_token %}
-
-    {% if form.non_field_errors %}
-      <div class="errors">{{ form.non_field_errors }}</div>
-    {% endif %}
-
-    <div class="grid">
-      <div class="field">
-        <label>Identificación</label>
-        {{ form.id_number }}
-        {% if form.id_number.errors %}<div class="errors">{{ form.id_number.errors }}</div>{% endif %}
-      </div>
-
-      <div class="field">
-        <label>Cliente</label>
-        {{ form.full_name }}
-        {% if form.full_name.errors %}<div class="errors">{{ form.full_name.errors }}</div>{% endif %}
-      </div>
-
-      <div class="field">
-        <label>Correo</label>
-        {{ form.email }}
-        {% if form.email.errors %}<div class="errors">{{ form.email.errors }}</div>{% endif %}
-      </div>
-
-      <div class="field">
-        <label>Total (COP)</label>
-        {{ form.total_amount_cop }}
-        {% if form.total_amount_cop.errors %}<div class="errors">{{ form.total_amount_cop.errors }}</div>{% endif %}
-      </div>
-    </div>
-
-    {# Si tu form tiene last_error u otros campos y quieres editarlos, agrégalos aquí #}
-
-    <div class="actions">
-      <button type="submit" class="btn btn-primary">💾 Guardar</button>
-    </div>
-  </form>
 </div>
+
+<script>
+(function(){
+  const tableBody = document.getElementById("itemsTbody");
+  const addBtn = document.getElementById("addItemBtn");
+  const calcTotalEl = document.getElementById("calcTotal");
+  const totalDisplay = document.getElementById("total_amount_display");
+
+  // ✅ CLAVE: seleccionar el TOTAL_FORMS del formset "items"
+  const totalForms = document.querySelector('input[name="items-TOTAL_FORMS"]');
+
+  function toInt(v){
+    if (v === null || v === undefined) return 0;
+    const s = String(v).replace(/[^\d\-]/g,'');
+    const n = parseInt(s || "0", 10);
+    return isNaN(n) ? 0 : n;
+  }
+
+  function formatCOP(n){
+    try { return new Intl.NumberFormat('es-CO').format(n); }
+    catch(e){ return String(n); }
+  }
+
+  /* ✅ Placa a mayúsculas (mientras escribe) */
+  function forceUppercase(el){
+    if (!el) return;
+    el.addEventListener("input", function(){
+      this.value = (this.value || "").toUpperCase();
+    });
+    el.value = (el.value || "").toUpperCase();
+  }
+
+  function rowIsDeleted(row){
+    const del = row.querySelector('input[type="checkbox"][name$="-DELETE"]');
+    return del ? del.checked : row.classList.contains("hide");
+  }
+
+  function compute(){
+    if (!tableBody) return;
+
+    let total = 0;
+
+    tableBody.querySelectorAll(".item-row").forEach(row => {
+      const park = row.querySelector('input[name$="-parking"]');
+      const work = row.querySelector('input[name$="-work"]');
+
+      const p = toInt(park ? park.value : 0);
+      const w = toInt(work ? work.value : 0);
+
+      if (!rowIsDeleted(row)) total += (p + w);
+    });
+
+    if (calcTotalEl) calcTotalEl.textContent = formatCOP(total);
+    if (totalDisplay) totalDisplay.value = formatCOP(total);
+  }
+
+  function bindRow(row){
+    const plate = row.querySelector('input[name$="-plate"]');
+    const park  = row.querySelector('input[name$="-parking"]');
+    const work  = row.querySelector('input[name$="-work"]');
+    const del   = row.querySelector('input[type="checkbox"][name$="-DELETE"]');
+    const removeBtn = row.querySelector(".js-remove");
+
+    // ✅ placa en mayúsculas (visual + mientras escribe)
+    forceUppercase(plate);
+
+    [park, work].forEach(el => {
+      if (!el) return;
+      el.addEventListener("input", compute);
+      el.addEventListener("change", compute);
+    });
+
+    if (del){
+      del.addEventListener("change", () => {
+        row.style.opacity = del.checked ? "0.55" : "1";
+        compute();
+      });
+      row.style.opacity = del.checked ? "0.55" : "1";
+    }
+
+    if (removeBtn){
+      removeBtn.addEventListener("click", () => {
+        // Si hay checkbox DELETE, úsalo. Si no, ocultar fila
+        if (del){
+          del.checked = true;
+          row.style.opacity = "0.55";
+        } else {
+          row.classList.add("hide");
+        }
+        compute();
+      });
+    }
+  }
+
+  function addRow(){
+    if (!tableBody || !totalForms) return;
+
+    const idx = parseInt(totalForms.value || "0", 10);
+
+    const wrap = document.getElementById("emptyFormFields");
+    const tpl  = document.getElementById("emptyFormTpl");
+    if (!wrap || !tpl) return;
+
+    const plateHTML = wrap.querySelector('[data-plate]').innerHTML.replace(/__prefix__/g, idx);
+    const wtHTML    = wrap.querySelector('[data-wt]').innerHTML.replace(/__prefix__/g, idx);
+    const parkHTML  = wrap.querySelector('[data-park]').innerHTML.replace(/__prefix__/g, idx);
+    const workHTML  = wrap.querySelector('[data-work]').innerHTML.replace(/__prefix__/g, idx);
+    const delHTML   = wrap.querySelector('[data-del]').innerHTML.replace(/__prefix__/g, idx);
+
+    const rowHTML = tpl.innerHTML
+      .replace("__PLATE__", plateHTML)
+      .replace("__WT__", wtHTML)
+      .replace("__PARK__", parkHTML)
+      .replace("__WORK__", workHTML)
+      .replace("__DEL__", delHTML);
+
+    const temp = document.createElement("tbody");
+    temp.innerHTML = rowHTML.trim();
+    const row = temp.querySelector("tr");
+    tableBody.appendChild(row);
+
+    // ✅ CLAVE: incrementar TOTAL_FORMS del prefix "items"
+    totalForms.value = String(idx + 1);
+
+    bindRow(row);
+    compute();
+  }
+
+  // Bind filas existentes
+  document.querySelectorAll(".item-row").forEach(bindRow);
+
+  // Fuerza mayúsculas por si vienen valores iniciales en minúscula
+  document.querySelectorAll('input[name$="-plate"]').forEach(forceUppercase);
+
+  if (addBtn) addBtn.addEventListener("click", addRow);
+
+  // cálculo inicial
+  compute();
+})();
+</script>
+
 {% endblock %}

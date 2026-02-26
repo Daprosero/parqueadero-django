@@ -6,7 +6,7 @@
   <style>
     body {
       font-family: 'Courier New', Courier, monospace;
-      font-size: 16px;            /* ✅ todo a 16 */
+      font-size: 16px;
       line-height: 1.28;
       font-weight: 600;
       -webkit-print-color-adjust: exact;
@@ -19,7 +19,6 @@
       background: #fff;
     }
 
-    /* 🔑 fuerza herencia total del tamaño */
     * { font-size: inherit; }
 
     .no-print {
@@ -28,27 +27,27 @@
       padding-bottom: 10px;
       text-align: center;
     }
+
     button {
       cursor: pointer;
       padding: 8px 15px;
       font-weight: bold;
-      border-radius: 5px; /* igual que recibo */
+      border-radius: 5px;
       border: 1px solid #000;
       background: #fff;
     }
 
-    /* === MISMAS CLASES DEL RECIBO === */
     .text-center { text-align: center; }
     .text-right { text-align: right; }
     .bold { font-weight: bold; }
     .uppercase { text-transform: uppercase; }
 
     .header { margin-bottom: 10px; }
-    .business-name { font-weight: bold; margin-bottom: 2px; } /* ❌ sin font-size */
+    .business-name { font-weight: bold; margin-bottom: 2px; }
 
     .dashed-line {
       border-bottom: 1px dashed #000;
-      margin: 5px 0;           /* igual que recibo */
+      margin: 5px 0;
       display: block;
       width: 100%;
     }
@@ -74,7 +73,6 @@
       text-overflow: ellipsis;
     }
 
-    /* ✅ ENTRADA: 2 líneas, sin recorte */
     td.col-entry {
       white-space: normal !important;
       overflow: visible !important;
@@ -90,54 +88,37 @@
 </head>
 <body>
 
-  <!-- Botones (no imprimen) -->
   <div class="no-print">
     <button type="button" onclick="window.print()">🖨️ IMPRIMIR</button>
-
-    <!-- ✅ Finalizar robusto -->
-     
     <button type="button" onclick="window.location.href='{{ finish_url }}'">⬅ Finalizar</button>
   </div>
 
-
-  <!-- Encabezado Negocio (MISMO ESTILO DEL RECIBO) -->
   <div class="header text-center">
     <div class="business-name uppercase">
       {{ BUSINESS_INFO.name }}
     </div>
-
-    <div>
-      NIT: {{ BUSINESS_INFO.nit }}
-    </div>
+    <div>NIT: {{ BUSINESS_INFO.nit }}</div>
 
     {% if BUSINESS_INFO.owner_name %}
-      <div class="uppercase">
-        {{ BUSINESS_INFO.owner_name }}
-      </div>
+      <div class="uppercase">{{ BUSINESS_INFO.owner_name }}</div>
     {% endif %}
 
     {% if BUSINESS_INFO.email %}
-      <div>
-        Correo: {{ BUSINESS_INFO.email }}
-      </div>
+      <div>Correo: {{ BUSINESS_INFO.email }}</div>
     {% endif %}
 
     {% if BUSINESS_INFO.phone %}
-      <div>
-        Cel: {{ BUSINESS_INFO.phone }}
-      </div>
+      <div>Cel: {{ BUSINESS_INFO.phone }}</div>
     {% endif %}
   </div>
-   <!-- Encabezado del Reporte -->
-    <div class="text-center" style="margin-bottom: 10px;">
-        <div class="business-name uppercase">Reporte</div>
-        <div class="bold"># {{ report_id}}</div>
-    </div>
 
+  <div class="text-center" style="margin-bottom: 10px;">
+    <div class="business-name uppercase">Reporte</div>
+    <div class="bold"># {{ report_id }}</div>
+  </div>
 
   <div class="dashed-line"></div>
 
-  <!-- Encabezado Reporte (mismo look del recibo) -->
   <div class="text-center" style="margin-bottom: 10px;">
     <div class="business-name uppercase">Reporte Vehículos Activos</div>
     <div>Fecha: {{ now|date:"d/m/Y h:i A" }}</div>
@@ -145,7 +126,7 @@
 
   <div class="dashed-line"></div>
 
-  <!-- Cabecera -->
+  <!-- CABECERA TABLA -->
   <table>
     <thead>
       <tr>
@@ -158,42 +139,66 @@
 
   <div class="dashed-line"></div>
 
-  <!-- Filas -->
+  <!-- HABITUALES -->
   <table>
     <tbody>
-      {% for t in active_tickets %}
+      {% for t in habitual_tickets %}
       <tr>
         <td style="width:30%;">{{ t.plate }}</td>
-
         <td style="width:32%;">
           {% if t.vehicle_type %}
             {{ t.vehicle_type.name|default:t.vehicle_type }}
-          {% elif t.vehicle_type_name %}
-            {{ t.vehicle_type_name }}
-          {% else %}
-            -
-          {% endif %}
+          {% else %}-{% endif %}
         </td>
-
-        <!-- ✅ ENTRADA EN DOS LÍNEAS -->
         <td style="width:38%;" class="text-right col-entry">
           {% if t.check_in %}
             <div>{{ t.check_in|date:"d/m/Y" }}</div>
             <div>{{ t.check_in|date:"h:i A" }}</div>
-          {% elif t.ui_checkin %}
-            <div>{{ t.ui_checkin }}</div>
-          {% else %}
-            -
-          {% endif %}
+          {% else %}-{% endif %}
         </td>
-      </tr>
-      {% empty %}
-      <tr>
-        <td colspan="3" class="text-center">No hay vehículos activos.</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+
+  <div class="dashed-line"></div>
+
+  <!-- =========================
+       MENSUALES REGISTRADOS
+       ========================= -->
+  <div class="text-center bold uppercase">
+    Mensuales registrados ({{ monthly_count|default:0 }})
+  </div>
+  <div class="dashed-line"></div>
+
+  <!-- MENSUALES (MISMA GRILLA 30/32/38 PARA ALINEAR) -->
+  <table>
+    <tbody>
+      {% for mp in monthly_plates %}
+      <tr>
+        <td style="width:30%;">{{ mp.plate }}</td>
+        <td style="width:32%;">Mensual</td>
+        <td style="width:38%;" class="text-right col-entry">
+          <div>No Aplica</div>
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="3" class="text-center">No hay mensuales registrados.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="dashed-line"></div>
+
+  <!-- =========================
+       TOTAL EN PATIO
+       ========================= -->
+  <div class="text-center bold uppercase" style="margin-top: 6px;">
+    Vehículos en patio:
+    {{ habitual_tickets|length|add:monthly_count }}
+  </div>
 
   <div class="dashed-line"></div>
 

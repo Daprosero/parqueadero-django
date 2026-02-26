@@ -1,6 +1,6 @@
 import math
 from django.utils import timezone
-from .models import Ticket, Customer, iter_pricing_segments
+from .models import Ticket, Customer, iter_pricing_segments,ElectronicInvoiceOutbox
 # parking/utils.py
 import os
 from datetime import datetime
@@ -143,15 +143,71 @@ def _get_friendly_error(error: Exception) -> str:
 
     return f"Error al procesar la factura: {str(error)}"
 
-###Nuevo##
+import logging
+from datetime import datetime
+
+from django.utils import timezone
+
+logger = logging.getLogger(__name__)
+
+
+import logging
+from datetime import datetime
+
+from django.utils import timezone
+
+logger = logging.getLogger(__name__)
+
+import logging
+from datetime import datetime
+
+from django.utils import timezone
+
+logger = logging.getLogger(__name__)
+
+
+import logging
+from datetime import datetime
+
+from django.utils import timezone
+from django.db import transaction
+
+logger = logging.getLogger(__name__)
+
+import logging
+from datetime import datetime
+
+from django.utils import timezone
+
+logger = logging.getLogger(__name__)
+
+import json
+import hashlib
+
 def emit_electronic_invoice_preview(
     *,
+    outbox_pk: int | None = None,   # ✅ NUEVO: si viene, actualiza ese mismo registro
     id_number: str,
     full_name: str,
     email: str,
     items: list,
 ) -> dict:
-    """Emite una factura electrónica a través de Siigo."""
+    """Emite una factura electrónica a través de Siigo.
+
+    ✅ NUEVO FORMATO items (lista de dicts):
+      - plate: str
+      - parking: int  (monto parqueadero COP)
+      - work: int     (monto servicio COP)
+      - work_type: str (código MAYÚSCULAS: EMBARILLADO, DESEMBARILLADO, NONE, etc.)
+
+    Reglas:
+      - Por cada placa puede generar 0/1/2 líneas (parqueadero y/o servicio).
+      - Si parking == 0 no se envía línea de parqueadero.
+      - Si work == 0 o work_type == "NONE" no se envía línea de servicio.
+    """
+
+    # ✅ IMPORT LOCAL para que _save_outbox tenga acceso al modelo (y no reviente)
+    from .models import ElectronicInvoiceOutbox
 
     data = {
         "id_number": (id_number or "").strip(),
@@ -159,73 +215,215 @@ def emit_electronic_invoice_preview(
         "email": (email or "").strip(),
     }
 
-    # Normalización mínima de items para:
-    # - usarla en outbox tal cual (plate/price)
-    # - asegurar hash estable (si tu modelo lo calcula)
     def _normalize_items(raw_items: list) -> list:
         cleaned = []
         if not isinstance(raw_items, list):
             return cleaned
+
+        def _to_int(x):
+            try:
+                return int(x or 0)
+            except Exception:
+                return 0
+
         for it in raw_items:
             if not isinstance(it, dict):
                 continue
+
             plate = (it.get("plate") or "").strip().upper()
-            try:
-                price = int(it.get("price") or 0)
-            except Exception:
-                price = 0
-            if plate and price > 0:
-                cleaned.append({"plate": plate, "price": price})
+
+            # soporta llaves alternativas por si llegan con nombres distintos
+            parking = _to_int(it.get("parking") if "parking" in it else it.get("parking_amount_cop"))
+            work = _to_int(it.get("work") if "work" in it else it.get("work_amount_cop"))
+
+            work_type = (it.get("work_type") or it.get("work_type_code") or "NONE").strip().upper() or "NONE"
+
+            # ✅ entra si hay algo que facturar
+            if plate and (parking > 0 or work > 0):
+                cleaned.append(
+                    {
+                        "plate": plate,
+                        "parking": parking,
+                        "work": work,
+                        "work_type": work_type,
+                    }
+                )
+
         return cleaned
 
-    def _save_outbox(msg: str, outbox_items: list) -> None:
-        """
-        Guardar/actualizar Outbox SOLO si hay total real > 0.
-        Camino 2 (ideal): guardamos items + items_hash.
-        """
+    def _model_has_field(Model, field_name: str) -> bool:
         try:
-            if data.get("total_amount_cop", 0) <= 0:
-                return  # 🔒 NUNCA guardar si el total es 0
-
-            from .models import ElectronicInvoiceOutbox
-
-            outbox_items = _normalize_items(outbox_items)
-            if not outbox_items:
-                return  # sin items válidos, no guardamos (tu modelo lo exige)
-
-            # Calcula hash estable usando el método del modelo
-            tmp = ElectronicInvoiceOutbox(
-                id_number=data["id_number"],
-                full_name=data["full_name"],
-                email=data["email"],
-                items=outbox_items,
-                status="PENDING",
-            )
-            items_hash = tmp._compute_items_hash()
-
-            # Upsert por id_number + email + items_hash (evita duplicados idénticos)
-            ElectronicInvoiceOutbox.objects.update_or_create(
-                id_number=data["id_number"],
-                email=data["email"],
-                items_hash=items_hash,
-                defaults={
-                    "full_name": data["full_name"],
-                    "items": outbox_items,
-                    "status": "PENDING",
-                    "last_error": (msg or "")[:2000],
-                    "last_attempt_at": timezone.now(),
-                    # total_amount_cop lo recalcula el clean() desde items
-                },
-            )
-
+            Model._meta.get_field(field_name)
+            return True
         except Exception:
-            # 🔒 Nunca romper flujo por error en Outbox
+            return False
+
+    def _safe_status(Model, requested: str) -> str:
+        try:
+            f = Model._meta.get_field("status")
+            valid = {c[0] for c in (getattr(f, "choices", None) or [])}
+            if valid and requested not in valid:
+                print(">>> OUTBOX: status", requested, "NO está en choices. Bajo a PENDING.")
+                return "PENDING"
+        except Exception:
             pass
+        return requested
+
+    def _save_outbox(
+        msg: str,
+        outbox_items: list,
+        *,
+        status: str,
+        extra: dict | None = None
+    ) -> None:
+        from .models import ElectronicInvoiceOutbox
+
+        print(">>> OUTBOX: ENTER _save_outbox() | status=", status, "| msg=", (msg or "")[:120])
+
+        outbox_items = _normalize_items(outbox_items)
+        if data.get("total_amount_cop", 0) <= 0:
+            print(">>> OUTBOX: SALIÓ porque total_amount_cop <= 0")
+            return
+        if not outbox_items:
+            print(">>> OUTBOX: SALIÓ porque no hay items válidos")
+            return
+
+        status = _safe_status(ElectronicInvoiceOutbox, status)
+
+        # --- items_hash ROBUSTO (NUNCA vacío) ---
+        tmp = ElectronicInvoiceOutbox(
+            id_number=data["id_number"],
+            full_name=data["full_name"],
+            email=data["email"],
+            items=outbox_items,
+            status="PENDING",
+        )
+
+        items_hash = ""
+        if hasattr(tmp, "_compute_items_hash"):
+            items_hash = (tmp._compute_items_hash() or "").strip()
+
+        if not items_hash:
+            payload = json.dumps(outbox_items, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            items_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+        print(">>> OUTBOX: items_hash =", items_hash)
+
+        # =========================
+        # ✅ MODO REENVÍO: ACTUALIZA MISMO PK
+        # =========================
+        if outbox_pk is not None:
+            obj = ElectronicInvoiceOutbox.objects.filter(pk=outbox_pk).first()
+            if obj:
+                # ✅ regla: si ya está SENT, NO downgrade a ERROR en el MISMO registro
+                if obj.status == "SENT" and status == "ERROR":
+                    obj.last_error = (f"WARNING (no downgrade): {msg}" if msg else obj.last_error)[:2000]
+                    obj.last_attempt_at = timezone.now()
+                    fields = ["last_error", "last_attempt_at"]
+                    if _model_has_field(ElectronicInvoiceOutbox, "updated_at"):
+                        fields.append("updated_at")
+                    obj.save(update_fields=fields)
+                    print(">>> OUTBOX: pk=", obj.pk, "ya SENT, se evita downgrade a ERROR (reenvío)")
+                    return
+
+                # ✅ actualiza en el MISMO pk
+                obj.id_number = data["id_number"]
+                obj.full_name = data["full_name"]
+                obj.email = data["email"]
+                obj.items = outbox_items
+                obj.items_hash = items_hash
+                obj.status = status
+                obj.last_attempt_at = timezone.now()
+
+                if status != "ERROR":
+                    obj.last_error = ""
+                    if _model_has_field(ElectronicInvoiceOutbox, "sent_at"):
+                        obj.sent_at = timezone.now()
+                else:
+                    obj.last_error = (msg or "")[:2000]
+
+                # ✅ extras (si existen como campos)
+                if extra:
+                    for k, v in extra.items():
+                        if _model_has_field(ElectronicInvoiceOutbox, k):
+                            setattr(obj, k, v)
+
+                # arma update_fields seguro
+                update_fields = [
+                    "id_number", "full_name", "email",
+                    "items", "items_hash", "status",
+                    "last_attempt_at", "last_error",
+                ]
+                if status != "ERROR" and _model_has_field(ElectronicInvoiceOutbox, "sent_at"):
+                    update_fields.append("sent_at")
+                if extra:
+                    for k in extra.keys():
+                        if _model_has_field(ElectronicInvoiceOutbox, k):
+                            update_fields.append(k)
+                if _model_has_field(ElectronicInvoiceOutbox, "updated_at"):
+                    update_fields.append("updated_at")
+
+                obj.save(update_fields=list(dict.fromkeys(update_fields)))
+                print(">>> OUTBOX: UPDATED (forced pk) | pk=", obj.pk, "| status=", obj.status)
+                return
+
+            # si no existe el pk, cae al modo normal
+            print(">>> OUTBOX: outbox_pk no existe. Caigo a upsert por (id_number,email,items_hash).")
+
+        # =========================
+        # ✅ MODO NORMAL (como hoy): upsert por triple llave
+        # =========================
+
+        existing = ElectronicInvoiceOutbox.objects.filter(
+            id_number=data["id_number"],
+            email=data["email"],
+            items_hash=items_hash,
+        ).first()
+
+        # ✅ regla: si ya está SENT, NO downgrade a ERROR para la MISMA factura
+        if existing and existing.status == "SENT" and status == "ERROR":
+            existing.last_error = (f"WARNING (no downgrade): {msg}" if msg else existing.last_error)[:2000]
+            existing.last_attempt_at = timezone.now()
+            fields = ["last_error", "last_attempt_at"]
+            if _model_has_field(ElectronicInvoiceOutbox, "updated_at"):
+                fields.append("updated_at")
+            existing.save(update_fields=fields)
+            print(">>> OUTBOX: existing=SENT, se evita downgrade a ERROR (misma factura)")
+            return
+
+        defaults = {
+            "id_number": data["id_number"],
+            "full_name": data["full_name"],
+            "email": data["email"],
+            "items": outbox_items,
+            "items_hash": items_hash,
+            "status": status,
+            "last_error": (msg or "")[:2000],
+            "last_attempt_at": timezone.now(),
+        }
+
+        if status != "ERROR":
+            defaults["last_error"] = ""
+            if _model_has_field(ElectronicInvoiceOutbox, "sent_at"):
+                defaults["sent_at"] = timezone.now()
+
+        if extra:
+            for k, v in extra.items():
+                if _model_has_field(ElectronicInvoiceOutbox, k):
+                    defaults[k] = v
+
+        obj, created_flag = ElectronicInvoiceOutbox.objects.update_or_create(
+            id_number=data["id_number"],
+            email=data["email"],
+            items_hash=items_hash,
+            defaults=defaults,
+        )
+
+        print(">>> OUTBOX:", "CREATED" if created_flag else "UPDATED", "| pk=", obj.pk, "| status=", obj.status)
 
     # =========================
     # VALIDACIONES BÁSICAS
     # =========================
-
     if not data["id_number"]:
         return {
             "success": False,
@@ -233,7 +431,6 @@ def emit_electronic_invoice_preview(
             "code": "MISSING_ID_NUMBER",
             **data,
         }
-
     if not data["full_name"]:
         return {
             "success": False,
@@ -241,7 +438,6 @@ def emit_electronic_invoice_preview(
             "code": "MISSING_FULL_NAME",
             **data,
         }
-
     if not data["email"]:
         return {
             "success": False,
@@ -249,7 +445,6 @@ def emit_electronic_invoice_preview(
             "code": "MISSING_EMAIL",
             **data,
         }
-
     if not isinstance(items, list) or not items:
         return {
             "success": False,
@@ -261,14 +456,22 @@ def emit_electronic_invoice_preview(
     # =========================
     # CONSTRUIR ITEMS + TOTAL
     # =========================
-
     tax_config = [{"id": SIIGO_CONFIG["tax_id"]}] if SIIGO_CONFIG.get("tax_id") else []
     siigo_items = []
     total = 0
 
-    for i, item in enumerate(items, 1):
-        plate = (item.get("plate") or "").strip() if isinstance(item, dict) else ""
-        if not plate:
+    normalized = _normalize_items(items)
+    if not normalized:
+        return {
+            "success": False,
+            "error": "Factura electrónica requiere al menos un ítem válido (parking/work > 0).",
+            "code": "MISSING_VALID_ITEMS",
+            **data,
+        }
+
+    for i, item in enumerate(normalized, 1):
+        plate_u = (item.get("plate") or "").strip().upper()
+        if not plate_u:
             return {
                 "success": False,
                 "error": f"Item {i}: falta 'plate'.",
@@ -277,38 +480,42 @@ def emit_electronic_invoice_preview(
                 **data,
             }
 
-        try:
-            price = int(item.get("price")) if isinstance(item, dict) else 0
-        except Exception:
-            price = 0
+        parking = int(item.get("parking") or 0)
+        work = int(item.get("work") or 0)
+        work_type = (item.get("work_type") or "NONE").strip().upper() or "NONE"
 
-        if price <= 0:
-            return {
-                "success": False,
-                "error": f"Item {i}: 'price' debe ser mayor a 0.",
-                "code": "INVALID_ITEM_PRICE",
-                "item_index": i,
-                **data,
-            }
+        # ✅ Línea parqueadero (si > 0)
+        if parking > 0:
+            siigo_items.append(
+                {
+                    "code": SIIGO_CONFIG["product_code"],
+                    "description": f"PARQUEADERO {plate_u}",
+                    "quantity": 1,
+                    "price": parking,
+                    "discount": 0,
+                    "taxes": tax_config,
+                }
+            )
+            total += parking
 
-        plate_u = plate.strip().upper()
-
-        siigo_items.append(
-            {
-                "code": SIIGO_CONFIG["product_code"],
-                "description": f"PARQUEADERO {plate_u}",
-                "quantity": 1,
-                "price": price,
-                "discount": 0,
-                "taxes": tax_config,
-            }
-        )
-
-        total += price
+        # ✅ Línea servicio (si > 0 y tipo != NONE)
+        if work > 0 and work_type != "NONE":
+            siigo_items.append(
+                {
+                    "code": SIIGO_CONFIG["product_code"],
+                    "description": f"{work_type} {plate_u}",
+                    "quantity": 1,
+                    "price": work,
+                    "discount": 0,
+                    "taxes": tax_config,
+                }
+            )
+            total += work
 
     data["total_amount_cop"] = int(total)
+    print(">>> EMIT: entro a emit_electronic_invoice_preview()", {**data, "total_amount_cop": data["total_amount_cop"]})
 
-    if data["total_amount_cop"] <= 0:
+    if data["total_amount_cop"] <= 0 or not siigo_items:
         return {
             "success": False,
             "error": "Monto total inválido para facturación",
@@ -319,18 +526,16 @@ def emit_electronic_invoice_preview(
     # =========================
     # VALIDAR CONFIG
     # =========================
-
     try:
         _validate_config()
     except Exception as e:
         msg = _get_friendly_error(e)
-        _save_outbox(msg, items)
+        _save_outbox(msg, normalized, status="ERROR")
         return {"success": False, "error": msg, "code": "SIIGO_NOT_CONFIGURED", **data}
 
     # =========================
     # ENVIAR A SIIGO
     # =========================
-
     try:
         client = SiigoClient(
             username=SIIGO_USERNAME,
@@ -343,10 +548,7 @@ def emit_electronic_invoice_preview(
         invoice_data = {
             "document": {"id": SIIGO_CONFIG["document_type_id"]},
             "date": today,
-            "customer": {
-                "identification": data["id_number"],
-                "branch_office": 0,
-            },
+            "customer": {"identification": data["id_number"], "branch_office": 0},
             "seller": SIIGO_CONFIG["seller_id"],
             "items": siigo_items,
             "payments": [
@@ -360,27 +562,37 @@ def emit_electronic_invoice_preview(
 
         result = client.create_invoice(invoice_data)
 
+        siigo_id = result.get("id")
+        siigo_number = result.get("name")
+        siigo_date = result.get("date")
+
+        print(">>> EMIT: Siigo OK. result.id=", siigo_id, "result.name=", siigo_number)
+
+        _save_outbox(
+            "",
+            normalized,
+            status="SENT",
+            extra={"siigo_id": siigo_id, "siigo_number": siigo_number, "siigo_date": siigo_date},
+        )
+
         return {
             "success": True,
-            "id": result.get("id"),
-            "number": result.get("name"),
+            "id": siigo_id,
+            "number": siigo_number,
             "total": result.get("total"),
-            "date": result.get("date"),
+            "date": siigo_date,
             **data,
         }
 
     except (SiigoAuthError, SiigoAPIError) as e:
         msg = _get_friendly_error(e)
-        _save_outbox(msg, items)
+        _save_outbox(msg, normalized, status="ERROR")
         return {"success": False, "error": msg, "code": "SIIGO_API_ERROR", **data}
 
     except Exception as e:
         msg = _get_friendly_error(e)
-        _save_outbox(msg, items)
+        _save_outbox(msg, normalized, status="ERROR")
         return {"success": False, "error": msg, "code": "UNEXPECTED_ERROR", **data}
-
-
-    
 
 def fmt_cop(n: int) -> str:
     try:

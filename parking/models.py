@@ -529,7 +529,10 @@ class Ticket(models.Model):
         blank=True,
         related_name="tickets"
     )
-
+    allow_manual_total = models.BooleanField(
+        default=False,
+        help_text="Si está activo, permite editar manualmente el total en el admin (no se recalcula automáticamente desde el admin).",
+    )
     total_amount_cop = models.PositiveIntegerField(null=True, blank=True)
 
     service_type = models.CharField(max_length=80, default="NONE")
@@ -808,29 +811,23 @@ class MonthlyPlate(models.Model):
 # Outbox temporal de Facturación Electrónica
 # ============================================================
 
-from django.db import models
-from django.utils import timezone
-from django.core.exceptions import ValidationError
-import hashlib
-import json
-
 class ElectronicInvoiceOutbox(models.Model):
     STATUS_CHOICES = [
         ("PENDING", "Pendiente"),
-        ("SENT", "Enviada"),  # conceptual, no persistente
+        ("ERROR", "Error"),
+        ("SENT", "Enviada"),
     ]
 
     id_number = models.CharField("Cédula o NIT", max_length=30, db_index=True)
     full_name = models.CharField("Nombre o razón social", max_length=160)
     email = models.EmailField("Correo electrónico", max_length=254)
 
-    # ✅ NUEVO: items reales
+    # Items reales
     items = models.JSONField(default=list, blank=True)
 
-    # (se mantiene por compatibilidad / UI)
     total_amount_cop = models.PositiveIntegerField(default=0)
 
-    # ✅ Opcional (recomendado): hash para upsert “idéntico”
+    # Hash para upsert idéntico
     items_hash = models.CharField(max_length=64, blank=True, db_index=True, default="")
 
     status = models.CharField(
@@ -843,34 +840,71 @@ class ElectronicInvoiceOutbox(models.Model):
     last_error = models.TextField("Último error", blank=True, default="")
     last_attempt_at = models.DateTimeField("Último intento", null=True, blank=True)
 
+    # (recomendado)
+    sent_at = models.DateTimeField("Enviada el", null=True, blank=True)
+
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ("-created_at",)
         indexes = [
-            models.Index(fields=["status", "-created_at"]),
+            models.Index(fields=["status", "created_at"]),
             models.Index(fields=["id_number"]),
             models.Index(fields=["items_hash"]),
         ]
 
+    def _normalize_items(self):
+        """
+        ✅ Nuevo formato soportado (preferido):
+          {"plate": "ABC123", "parking": 8000, "work": 3000, "work_type": "EMBARILLADO"}
+
+        ✅ Compatibilidad formato viejo:
+          {"plate": "ABC123", "price": 11000}  -> se convierte a parking=price, work=0, work_type="NONE"
+
+        Devuelve SIEMPRE lista normalizada con llaves:
+          plate, parking, work, work_type
+        """
+        def _to_int(x):
+            try:
+                return int(x or 0)
+            except Exception:
+                return 0
+
+        norm = []
+        for it in (self.items or []):
+            if not isinstance(it, dict):
+                continue
+
+            plate = (it.get("plate") or "").strip().upper()
+            if not plate:
+                continue
+
+            # ✅ formato viejo (price)
+            if "price" in it and ("parking" not in it and "work" not in it):
+                price = _to_int(it.get("price"))
+                if price > 0:
+                    norm.append({"plate": plate, "parking": price, "work": 0, "work_type": "NONE"})
+                continue
+
+            # ✅ formato nuevo
+            parking = _to_int(it.get("parking") if "parking" in it else it.get("parking_amount_cop"))
+            work = _to_int(it.get("work") if "work" in it else it.get("work_amount_cop"))
+            work_type = (it.get("work_type") or it.get("work_type_code") or "NONE").strip().upper() or "NONE"
+
+            if parking > 0 or work > 0:
+                norm.append({"plate": plate, "parking": parking, "work": work, "work_type": work_type})
+
+        return norm
+
     def _compute_items_hash(self) -> str:
         """
-        Hash estable para evitar duplicados.
-        Normaliza keys relevantes (plate/price).
+        Hash del contenido normalizado.
+        - Incluye plate, parking, work, work_type
+        - Esto evita colisiones y mantiene idempotencia del upsert.
         """
         try:
-            norm = []
-            for it in (self.items or []):
-                if not isinstance(it, dict):
-                    continue
-                plate = (it.get("plate") or "").strip().upper()
-                try:
-                    price = int(it.get("price") or 0)
-                except Exception:
-                    price = 0
-                if plate and price > 0:
-                    norm.append({"plate": plate, "price": price})
+            norm = self._normalize_items()
             payload = json.dumps(norm, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
             return hashlib.sha256(payload.encode("utf-8")).hexdigest()
         except Exception:
@@ -883,59 +917,54 @@ class ElectronicInvoiceOutbox(models.Model):
         self.full_name = (self.full_name or "").strip()
         self.email = (self.email or "").strip()
 
-        if self.status == "SENT":
-            return
-
-        # ✅ valida items
         if not isinstance(self.items, list) or not self.items:
             raise ValidationError({"items": "Debe incluir al menos un ítem."})
 
-        # recalcula total desde items para coherencia
-        total = 0
-        cleaned = []
-        for i, it in enumerate(self.items, 1):
-            if not isinstance(it, dict):
-                raise ValidationError({"items": f"Ítem {i}: formato inválido."})
-            plate = (it.get("plate") or "").strip().upper()
-            try:
-                price = int(it.get("price") or 0)
-            except Exception:
-                price = 0
-            if not plate:
-                raise ValidationError({"items": f"Ítem {i}: falta 'plate'."})
-            if price <= 0:
-                raise ValidationError({"items": f"Ítem {i}: 'price' debe ser > 0."})
-            cleaned.append({"plate": plate, "price": price})
-            total += price
+        cleaned = self._normalize_items()
+        if not cleaned:
+            raise ValidationError({"items": "Debe incluir al menos un ítem válido (plate y parking/work > 0)."})
 
+
+        # ✅ normaliza lo que queda guardado en BD
         self.items = cleaned
-        self.total_amount_cop = int(total)
+
+        # ✅ total nuevo: suma de parking + work
+        self.total_amount_cop = int(sum((it.get("parking", 0) or 0) + (it.get("work", 0) or 0) for it in cleaned))
+
+        # ✅ hash nuevo
         self.items_hash = self._compute_items_hash()
 
         if not self.id_number:
             raise ValidationError({"id_number": "Este campo es obligatorio."})
         if not self.full_name:
             raise ValidationError({"full_name": "Este campo es obligatorio."})
-        if self.total_amount_cop < 0:
-            raise ValidationError({"total_amount_cop": "No puede ser negativo."})
+        if self.total_amount_cop <= 0:
+            raise ValidationError({"total_amount_cop": "Debe ser mayor a 0."})
+
+        # ✅ Si está enviada y no tiene sent_at, asignarlo
+        if self.status == "SENT" and not self.sent_at:
+            self.sent_at = timezone.now()
 
     def save(self, *args, **kwargs):
-        if self.status == "SENT":
-            return
         self.full_clean()
         return super().save(*args, **kwargs)
 
     def mark_failed(self, message: str = ""):
-        self.status = "PENDING"
+        self.status = "ERROR"
         self.last_attempt_at = timezone.now()
-        self.last_error = (message or "").strip()
+        self.last_error = (message or "").strip()[:2000]
         self.save(update_fields=["status", "last_attempt_at", "last_error", "updated_at"])
 
     def mark_sent(self):
-        self.delete()
+        self.status = "SENT"
+        self.last_error = ""
+        self.last_attempt_at = timezone.now()
+        if not self.sent_at:
+            self.sent_at = timezone.now()
+        self.save(update_fields=["status", "last_error", "last_attempt_at", "sent_at", "updated_at"])
 
     def __str__(self):
-        return f"FE Outbox #{self.id} - PENDING - {self.id_number} - {self.total_amount_cop} COP"
+        return f"FE Outbox #{self.pk} - {self.status} - {self.id_number} - {self.total_amount_cop} COP"
 
 class MonthlyReceipt(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)

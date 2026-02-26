@@ -265,7 +265,15 @@
               <td>{{ t.vehicle_type.name }}</td>
               <td>{{ t.get_client_kind_display }}</td>
               <td>
-                {% if t.status == "ACTIVE" %}ACTIVO{% elif t.status == "PENDING" %}PENDIENTE{% else %}PAGADO{% endif %}
+                {% if t.status == "ASSIGNED" %}
+                  ASIGNADO
+                {% elif t.status == "PENDING" %}
+                  PENDIENTE
+                {% elif t.status == "PAID" %}
+                  PAGADO
+                {% else %}
+                  -
+                {% endif %}
               </td>
 
               {# ✅ Usamos el formateo de la view si existe (t.ui_total), si no fallback #}

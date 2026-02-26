@@ -171,7 +171,16 @@
 
       <div>
         <strong>Estado:</strong>
-        {% if ticket.status == "PENDING" %}PENDIENTE{% else %}PAGADO{% endif %}
+        {% if ticket.status == "ASSIGNED" %}
+          ASIGNADO
+        {% elif ticket.status == "PENDING" %}
+          PENDIENTE
+        {% elif ticket.status == "PAID" %}
+          PAGADO
+        {% else %}
+          -
+        {% endif %}
+
       </div>
 
       <div><strong>Salida:</strong> {% if ticket.check_out %}{{ ticket.check_out|date:"d/m/Y h:i a" }}{% else %}—{% endif %}</div>

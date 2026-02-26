@@ -686,140 +686,190 @@
         <a href="#" class="sidebar-tab active" data-tab="last">Últimas 3 transacciones</a>
         <a href="#" class="sidebar-tab" data-tab="pending">
           Pagos pendientes
-        <span class="pending-count {% if pending_tickets|length > 0 %}has-pending{% endif %}">
-          ({{ pending_tickets|length }})
-        </span>
+          <span class="pending-count {% if pending_tickets|length > 0 %}has-pending{% endif %}">
+            ({{ pending_tickets|length }})
+          </span>
         </a>
       </div>
 
       <!-- =======================
-           TAB: ÚLTIMAS TRANSACCIONES
-           ======================= -->
+      TAB: ÚLTIMAS TRANSACCIONES
+      ======================= -->
       <div class="sidebar-panel active" id="tab-last">
-        {% if last_transactions %}
-          <table>
-            {% for t in last_transactions %}
-              <tr>
+
+      <table>
+
+        {% if sidebar_last_items %}
+          {% for it in sidebar_last_items %}
+            {% if it.kind == "ticket" %}
+              {% with t=it.ticket %}
+                <tr>
+                  <td>
+                    <div style="font-weight:bold; color:var(--text-main);">
+                      {{ t.plate }}
+
+                      {% if t.status == "ACTIVE" %}
+                        <span class="status-pill active">ACTIVO</span>
+                      {% elif t.status == "PENDING" %}
+                        <span class="status-pill pending">PENDIENTE</span>
+                      {% elif t.status == "PAID" %}
+                        <span class="status-pill paid">PAGADO</span>
+                      {% elif t.status == "CREDIT" %}
+                        <span class="status-pill credit">CRÉDITO</span>
+                      {% elif t.payment_method == "CREDIT" or t.method == "CREDIT" or t.company %}
+                        <span class="status-pill credit">CRÉDITO</span>
+                      {% endif %}
+                    </div>
+
+                    <div class="subline">
+                      {{ t.vehicle_type.name }} • {{ t.get_client_kind_display }}
+                    </div>
+
+                    {% if t.status != "ACTIVE" %}
+                      <div class="subline" style="margin-top:6px;">
+                        Parqueadero:
+                        <span class="mono">
+                          {% if t.parking_amount_ui %}
+                            ${{ t.parking_amount_ui }}
+                          {% else %} — {% endif %}
+                        </span>
+                        &nbsp;|&nbsp;
+                        Servicio:
+                        <span class="mono">
+                          {% if t.service_text_ui and t.service_amount_ui %}
+                            {{ t.service_text_ui }} (${{ t.service_amount_ui }})
+                          {% else %} — {% endif %}
+                        </span>
+                        &nbsp;|&nbsp;
+                        Total:
+                        <span class="mono">
+                          {% if t.total_amount_ui %}
+                            ${{ t.total_amount_ui }}
+                          {% else %} — {% endif %}
+                        </span>
+                      </div>
+
+                      {% if t.company %}
+                        <div class="subline" style="margin-top:6px;">
+                          Empresa: <b>{{ t.company.full_name|default:t.company }}</b>
+                        </div>
+                      {% endif %}
+                    {% endif %}
+                  </td>
+
+                  <td style="text-align:right; white-space:nowrap;">
+
+                    {% if t.status == "ACTIVE" %}
+                      <a class="mini-btn"
+                        href="{% url 'parking:ticket_edit_active' t.id %}">
+                        Editar
+                      </a>
+                    {% endif %}
+
+                    {% if t.payment_id_ui %}
+                      <a class="mini-btn"
+                        style="background:#2c7be5; color:white;"
+                        href="{% url 'parking:print_receipt' t.payment_id_ui %}">
+                        🖨️ Recibo
+                      </a>
+                    {% endif %}
+
+                  </td>
+                </tr>
+              {% endwith %}
+            {% else %}
+              {% with c=it.closure %}
+                <tr>
+                  <td>
+                    <div style="font-weight:bold; color:var(--text-main);">
+                      CIERRE DE CAJA #{{ c.id }}
+                      <span class="status-pill paid">CIERRE</span>
+                    </div>
+
+                    <div class="subline">
+                      {{ c.date|date:"Y-m-d H:i" }}
+                    </div>
+                  </td>
+
+                  <td style="text-align:right; white-space:nowrap;">
+                    <a class="mini-btn"
+                      style="background:#28a745; color:white;"
+                      href="{% url 'parking:reprint_closure' c.id %}">
+                      🖨️ Recibo
+                    </a>
+                  </td>
+                </tr>
+              {% endwith %}
+            {% endif %}
+
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="2" style="padding:30px 0; text-align:center; color:var(--text-muted); font-style:italic;">
+              No hay transacciones recientes.
+            </td>
+          </tr>
+        {% endif %}
+
+      </table>
+    </div>
+
+
+    <!-- =======================
+        TAB: PAGOS PENDIENTES
+        ======================= -->
+    <div class="sidebar-panel" id="tab-pending">
+
+      <div class="pending-search">
+        <input id="pendingSearchInput" type="text" placeholder="Buscar por placa…">
+      </div>
+
+      <div class="scroll-3">
+        {% if pending_tickets %}
+          <table id="pendingTicketsTable">
+            {% for t in pending_tickets %}
+              <tr data-plate="{{ t.plate|default:'' }}">
                 <td>
                   <div style="font-weight:bold; color:var(--text-main);">
                     {{ t.plate }}
-
-                    {% if t.status == "ACTIVE" %}
-                      <span class="status-pill active">ACTIVO</span>
-                    {% elif t.status == "PENDING" %}
-                      <span class="status-pill pending">PENDIENTE</span>
-                    {% elif t.status == "PAID" %}
-                      <span class="status-pill paid">PAGADO</span>
-                    {% elif t.status == "CREDIT" %}
-                      <span class="status-pill credit">CRÉDITO</span>
-                    {% elif t.payment_method == "CREDIT" or t.method == "CREDIT" or t.company %}
-                      <span class="status-pill credit">CRÉDITO</span>
-                    {% endif %}
+                    <span class="status-pill pending">PENDIENTE</span>
                   </div>
 
                   <div class="subline">
                     {{ t.vehicle_type.name }} • {{ t.get_client_kind_display }}
                   </div>
-
-                  {% if t.status == "PAID" or t.status == "PENDING" or t.status == "CREDIT" or t.payment_method == "CREDIT" or t.method == "CREDIT" or t.company %}
-                    <div class="subline" style="margin-top:6px;">
-                      Parqueadero:
-                      <span class="mono">
-                        {% if t.parking_amount_ui %}
-                          ${{ t.parking_amount_ui }}
-                        {% else %}
-                          —
-                        {% endif %}
-                      </span>
-                      &nbsp;|&nbsp;
-                      Servicio:
-                      <span class="mono">
-                        {% if t.service_text_ui and t.service_amount_ui %}
-                          {{ t.service_text_ui }} (${{ t.service_amount_ui }})
-                        {% else %}
-                          —
-                        {% endif %}
-                      </span>
-                      &nbsp;|&nbsp;
-                      Total:
-                      <span class="mono">
-                        {% if t.total_amount_ui %}
-                          ${{ t.total_amount_ui }}
-                        {% else %}
-                          —
-                        {% endif %}
-                      </span>
-                    </div>
-
-                    {% if t.company %}
-                      <div class="subline" style="margin-top:6px;">
-                        Empresa: <b>{{ t.company.full_name|default:t.company }}</b>
-                      </div>
-                    {% endif %}
-                  {% endif %}
                 </td>
 
                 <td style="text-align:right; white-space:nowrap;">
-                  {% if t.status == "ACTIVE" %}
-                    <a class="mini-btn" href="{% url 'parking:ticket_edit_active' t.id %}">Editar</a>
-                  {% else %}
-                    <span class="subline">—</span>
+
+                  <a class="mini-btn"
+                    href="?mode=charge&ticket_id={{ t.id }}&plate={{ t.plate }}">
+                    Pagar
+                  </a>
+
+                  {% if t.payment_id_ui %}
+                    <a class="mini-btn"
+                      style="background:#2c7be5; color:white;"
+                      href="{% url 'parking:print_receipt' t.payment_id_ui %}">
+                      🖨️ Recibo
+                    </a>
                   {% endif %}
+
                 </td>
               </tr>
             {% endfor %}
           </table>
         {% else %}
           <div style="padding:40px 0; text-align:center; color:var(--text-muted); font-style:italic;">
-            No hay transacciones recientes.
+            No hay pagos pendientes.
           </div>
         {% endif %}
       </div>
-
-      <!-- =======================
-           TAB: PAGOS PENDIENTES (✅ SOLO 3 + SCROLL)
-           ======================= -->
-      <div class="sidebar-panel" id="tab-pending">
-
-        <div class="pending-search">
-          <input id="pendingSearchInput" type="text" placeholder="Buscar por placa…">
-        </div>
-
-        {# ✅ AJUSTE: SOLO 3 REGISTROS VISIBLES + SCROLL CON BARRA #}
-        <div class="scroll-3">
-          {% if pending_tickets %}
-            <table id="pendingTicketsTable">
-              {% for t in pending_tickets %}
-                <tr data-plate="{{ t.plate|default:'' }}">
-                  <td>
-                    <div style="font-weight:bold; color:var(--text-main);">
-                      {{ t.plate }}
-                      <span class="status-pill pending">PENDIENTE</span>
-                    </div>
-
-                    <div class="subline">
-                      {{ t.vehicle_type.name }} • {{ t.get_client_kind_display }}
-                    </div>
-                  </td>
-
-                  <td style="text-align:right; white-space:nowrap;">
-                    <a class="mini-btn" href="?mode=charge&ticket_id={{ t.id }}&plate={{ t.plate }}">Pagar</a>
-                  </td>
-
-
-
-                </tr>
-              {% endfor %}
-            </table>
-          {% else %}
-            <div style="padding:40px 0; text-align:center; color:var(--text-muted); font-style:italic;">
-              No hay pagos pendientes.
-            </div>
-          {% endif %}
-        </div>
-      </div>
-
     </div>
+
+      
+
+
 
     {% if mode == "inspect" and inspect_info %}
       <div class="result-box">

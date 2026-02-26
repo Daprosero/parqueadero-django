@@ -17,25 +17,127 @@ from .models import (
     ElectronicInvoiceOutbox,WorkType
 )
 # forms.py
+from django import forms
+from django.forms import formset_factory
+import re
+
+from .models import ElectronicInvoiceOutbox, WorkType
+
+
+# forms.py
+import re
+from django import forms
+from django.forms import formset_factory
+from .models import ElectronicInvoiceOutbox, WorkType
+
 
 class EInvoiceOutboxForm(forms.ModelForm):
     class Meta:
         model = ElectronicInvoiceOutbox
-        fields = [
-            "id_number",
-            "full_name",
-            "email",
-            "total_amount_cop",
-            # agrega/quita según tu modelo
-            # "notes", "address", "phone", etc...
-        ]
+        # ✅ total_amount_cop NO va aquí (se calcula desde items)
+        fields = ["id_number", "full_name", "email"]
         widgets = {
             "full_name": forms.TextInput(attrs={"class": "form-control"}),
             "email": forms.EmailInput(attrs={"class": "form-control"}),
             "id_number": forms.TextInput(attrs={"class": "form-control"}),
-            "total_amount_cop": forms.NumberInput(attrs={"class": "form-control"}),
         }
 
+    def clean_id_number(self):
+        return (self.cleaned_data.get("id_number") or "").strip()
+
+    def clean_full_name(self):
+        return (self.cleaned_data.get("full_name") or "").strip()
+
+    def clean_email(self):
+        return (self.cleaned_data.get("email") or "").strip()
+
+
+class EInvoiceItemForm(forms.Form):
+    plate = forms.CharField(
+        label="Placa",
+        max_length=12,
+        required=True,
+        widget=forms.TextInput(
+            attrs={
+                "class": "form-control",
+                "placeholder": "UER034",
+                "autocomplete": "off",
+            }
+        )
+    )
+
+    work_type = forms.ModelChoiceField(
+        label="Tipo de trabajo",
+        queryset=WorkType.objects.filter(active=True).order_by("name"),
+        required=False,
+        empty_label="NONE (sin servicio)",
+        widget=forms.Select(attrs={"class": "form-control"}),
+    )
+
+    parking = forms.IntegerField(
+        label="Parqueo (COP)",
+        required=True,
+        min_value=0,
+        initial=0,
+        widget=forms.NumberInput(attrs={"class": "form-control"})
+    )
+
+    work = forms.IntegerField(
+        label="Trabajo (COP)",
+        required=True,
+        min_value=0,
+        initial=0,
+        widget=forms.NumberInput(attrs={"class": "form-control"})
+    )
+
+    def clean_plate(self):
+        raw = (self.cleaned_data.get("plate") or "").strip().upper()
+        plate = raw.replace(" ", "").replace("-", "")
+        plate = re.sub(r"[^A-Z0-9]", "", plate)
+
+        if not plate:
+            raise forms.ValidationError("La placa es obligatoria.")
+
+        return plate
+
+    def clean(self):
+        cleaned = super().clean()
+
+        wt = cleaned.get("work_type")
+        parking = cleaned.get("parking")
+        work = cleaned.get("work")
+
+        try:
+            parking = int(parking or 0)
+            work = int(work or 0)
+        except (TypeError, ValueError):
+            raise forms.ValidationError("Parqueo y Trabajo deben ser valores numéricos válidos (COP).")
+
+        if parking < 0 or work < 0:
+            raise forms.ValidationError("Parqueo y Trabajo no pueden ser negativos.")
+
+        wt_code = (getattr(wt, "code", "") or "").strip().upper() if wt else "NONE"
+
+        # Si NO hay servicio → Trabajo forzado a 0
+        if wt is None or wt_code == "NONE":
+            work = 0
+
+        # Si hay servicio real → Trabajo debe ser > 0
+        if wt is not None and wt_code != "NONE" and work <= 0:
+            raise forms.ValidationError(
+                "Si seleccionas un tipo de trabajo, el valor Trabajo debe ser mayor que 0."
+            )
+
+        cleaned["parking"] = parking
+        cleaned["work"] = work
+        return cleaned
+
+
+EInvoiceItemFormSet = formset_factory(
+    EInvoiceItemForm,
+    extra=0,
+    can_delete=True,
+)
 class MonthlyChargeForm(forms.Form):
     METHOD_CHOICES = [
         ("", "— Selecciona una opción —"),

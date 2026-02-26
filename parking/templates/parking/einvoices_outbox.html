@@ -7,9 +7,6 @@
 {% block content %}
 
 <style>
-  /* ============================================================
-     FONDO GLOBAL SOLO EN ESTA VISTA
-  ============================================================ */
   html, body { background-color: #f3f4f6 !important; }
 
   body:has(.dash-scope) main,
@@ -25,9 +22,6 @@
     margin-bottom: 0 !important;
   }
 
-  /* ============================================================
-     DASH SCOPE
-  ============================================================ */
   .dash-scope{
     --d-bg:#f3f4f6;
     --d-sheet:#ffffff;
@@ -61,9 +55,6 @@
     gap:1.25rem;
   }
 
-  /* ============================================================
-     HEADER
-  ============================================================ */
   .header-row{
     display:flex;
     justify-content:space-between;
@@ -105,9 +96,6 @@
     transform:translateY(-1px);
   }
 
-  /* ============================================================
-     PANEL
-  ============================================================ */
   .panel{
     border:1px solid var(--d-border);
     border-radius:12px;
@@ -135,40 +123,31 @@
     z-index:2;
   }
 
-  /* ============================================================
-     BOTONES DE ACCIÓN (compactos, 1 renglón)
-  ============================================================ */
   .row-actions{
     display:flex;
     gap:6px;
     justify-content:flex-end;
-    flex-wrap:nowrap; /* 🔑 siempre una fila */
+    flex-wrap:nowrap;
   }
 
   .action-btn{
     display:inline-flex;
     align-items:center;
     justify-content:center;
-
-    height:32px;              /* más compacto */
+    height:32px;
     padding:0 10px;
     gap:4px;
-
     font-size:.85rem;
     font-weight:800;
     line-height:1;
-
     border-radius:999px;
     cursor:pointer;
     white-space:nowrap;
     text-decoration:none;
-
     background:#fff;
     border:1px solid var(--d-border);
-
     appearance:none;
     -webkit-appearance:none;
-
     transition:all .15s ease;
   }
 
@@ -203,22 +182,34 @@
     line-height:1.25;
   }
 
+  /* ✅ NUEVO: Enviada en verde */
+  .ok-box{
+    margin-top:6px;
+    font-size:.8rem;
+    color:#166534;
+    background:#ecfdf5;
+    border:1px solid #bbf7d0;
+    padding:6px 8px;
+    border-radius:8px;
+    line-height:1.25;
+    font-weight:800;
+    display:inline-block;
+  }
+
   .mono{
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
-    /* ✅ Volver (mismo estilo del Dashboard) */
+
   .back-to-menu{
     display:inline-flex;
     width:fit-content;
     align-self:flex-start;
-
     align-items:center;
     gap:0.5rem;
     font-weight:900;
     font-size:0.9rem;
     color:var(--d-muted);
     text-decoration:none;
-
     padding:0.25rem 0.4rem;
     border-radius:8px;
     border:1px solid transparent;
@@ -234,11 +225,11 @@
     font-size:1.05rem;
     line-height:1;
   }
-
 </style>
 
 <div class="dash-scope">
   <div class="dashboard-sheet">
+
     <a class="back-to-menu" href="{% url 'parking:gestion' %}">
       <span class="arrow">←</span>
       <span>Volver</span>
@@ -246,8 +237,8 @@
 
     <div class="header-row">
       <div class="header-title">
-        <h2>Facturas Electrónicas Pendientes</h2>
-        <p>Cola temporal de facturación — estado <b>PENDING</b></p>
+        <h2>Facturas Electrónicas</h2>
+        <p>Cola temporal de facturación</p>
       </div>
 
       <a class="btn-dash"
@@ -281,8 +272,11 @@
 
               <td>
                 <b>{{ inv.full_name }}</b>
+
                 {% if inv.last_error %}
                   <div class="err-box"><b>Error:</b> {{ inv.last_error }}</div>
+                {% else %}
+                  <div class="ok-box">✅ Enviada</div>
                 {% endif %}
               </td>
 
@@ -314,7 +308,7 @@
                     <button type="submit"
                             class="action-btn btn-danger-outline"
                             title="Eliminar"
-                            onclick="return confirm('¿Eliminar este registro pendiente de factura electrónica?');">
+                            onclick="return confirm('¿Eliminar este registro de factura electrónica?');">
                       🗑️
                     </button>
                   </form>
@@ -327,7 +321,7 @@
       </div>
       {% else %}
         <div style="padding:28px;text-align:center;color:#6b7280;font-style:italic;">
-          No hay facturas electrónicas pendientes.
+          No hay facturas electrónicas registradas.
         </div>
       {% endif %}
     </div>
