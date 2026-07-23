@@ -16,3 +16,5 @@ media/
 # OS / Editor
 .DS_Store
 .vscode/
+# Local Pi runtime state
+.atl/

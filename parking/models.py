@@ -1,6 +1,7 @@
 from datetime import datetime, time, timedelta
 import math
-
+import json
+import hashlib
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
@@ -742,7 +743,7 @@ class Payment(models.Model):
         null=True,
         blank=True,
     )
-
+    updated_at = models.DateTimeField(auto_now=True)
     method = models.CharField(max_length=10, choices=METHOD_CHOICES)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="PAID")
 

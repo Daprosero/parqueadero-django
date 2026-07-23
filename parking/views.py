@@ -64,7 +64,7 @@ from .utils import (
     force_credit_disabled,
     estimate_amount_cop,
     emit_electronic_invoice_preview,
-    resolve_or_create_customer, 
+    resolve_or_create_customer,
     normalize_id_number,
 )
 
@@ -89,7 +89,7 @@ def post_login_redirect(request):
     user = request.user
     if user.is_staff or user.is_superuser:
         return redirect("parking:gestion")          # ✅ tu panel de gestión
-    return redirect("parking:operator_panel") 
+    return redirect("parking:operator_panel")
 
 def _safe_next(request, next_url: str) -> str:
     """
@@ -829,13 +829,47 @@ def operator_panel(request):
 
             messages.success(request, f"Ingreso registrado: {ticket.plate}")
             return redirect(f"{reverse('parking:operator_panel')}?mode=menu")
-
+    pending_plate_warning = None
     # CHARGE############
     if request.method == "POST" and mode == "charge":
         close_form = ClosePaymentForm(request.POST)
         if close_form.is_valid():
 
             plate = (close_form.cleaned_data["plate"] or "").strip().upper().replace(" ", "").replace("-", "")
+            confirm_pending_plate = (request.POST.get("confirm_pending_plate") == "1")
+
+            # ✅ advertir si la placa tiene tickets pendientes abiertos
+            pending_same_plate_qs = Ticket.objects.filter(
+                plate__iexact=plate,
+                closure__isnull=True,
+                status="PENDING",
+            ).order_by("-check_in")
+
+
+            # si vienen desde un ticket puntual, no contarse a sí mismo
+            ticket_id_for_warning = close_form.cleaned_data.get("ticket_id")
+            if ticket_id_for_warning:
+                pending_same_plate_qs = pending_same_plate_qs.exclude(id=ticket_id_for_warning)
+
+            pending_same_plate_count = pending_same_plate_qs.count()
+
+            if pending_same_plate_count > 0 and not confirm_pending_plate:
+                pending_plate_warning = {
+                    "plate": plate,
+                    "count": pending_same_plate_count,
+                    "ticket_ids": list(pending_same_plate_qs.values_list("id", flat=True)[:10]),
+                }
+                return render(request, "parking/operator_panel.html", {
+                    "mode": mode,
+                    "checkin_form": checkin_form,
+                    "close_form": close_form,
+                    "inspect_form": inspect_form,
+                    "amount": amount,
+                    "inspect_info": inspect_info,
+                    "pending_plate_warning": pending_plate_warning,
+                    "open_tickets": open_tickets,
+                    "is_admin": is_admin,
+                })
 
             # =========================
             # 🔒 BLOQUEO: NO permitir pagar/salir con placas mensuales
@@ -1160,8 +1194,8 @@ def operator_panel(request):
     # ✅ AJUSTE: global (sin created_by)
     last_transactions_candidates = list(
         Ticket.objects.filter(closure__isnull=True)
-        .select_related("vehicle_type")
-        .annotate(last_dt=Coalesce("check_out", "check_in"))
+        .select_related("vehicle_type", "payment")
+        .annotate(last_dt=Coalesce("payment__updated_at", "payment__created_at", "check_out", "check_in"))
         .order_by("-last_dt")[:10]
     )
 
@@ -1239,7 +1273,34 @@ def operator_panel(request):
         .annotate(last_dt=Coalesce("check_out", "check_in"))
         .order_by("-last_dt")[:500]
     )
+    # ✅ Enriquecer PENDIENTES (UI) para que el template pueda mostrar total_amount_ui, etc.
+    pending_pay_map = {
+        p.ticket_id: p
+        for p in Payment.objects.filter(ticket_id__in=[t.id for t in pending_tickets])
+    }
 
+    for t in pending_tickets:
+        flag = ticket_has_service(t)
+        t._has_service_ui = flag
+        t.has_service_ui = flag
+
+        total = int(getattr(t, "total_amount_cop", 0) or 0)
+        if total <= 0 and t.id in pending_pay_map:
+            try:
+                total = int(pending_pay_map[t.id].amount_cop or 0)
+            except Exception:
+                total = 0
+
+        s_txt, s_amt = ticket_service_display(t)
+        parking_amt = max(total - int(s_amt or 0), 0)
+
+        t.total_amount_ui = fmt_cop(total)
+        t.parking_amount_ui = fmt_cop(parking_amt)
+        t.service_text_ui = s_txt
+        t.service_amount_ui = fmt_cop(s_amt)
+
+        p = pending_pay_map.get(t.id)
+        t.payment_id_ui = p.id if p else None
     # últimos pagados ✅ global
     paid_tickets = list(Ticket.objects.filter(status="PAID").order_by("-check_out")[:30])
     paid_payments_by_ticket_id = {
@@ -2073,7 +2134,7 @@ def gestion(request):
             "is_admin": True,
         })
 
-  
+
 
     # =========================
     # CUSTOMER (sin cambios)

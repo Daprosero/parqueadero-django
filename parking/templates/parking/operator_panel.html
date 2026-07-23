@@ -484,12 +484,16 @@
       {% endif %}
 
       {% if mode == "charge" %}
-        <a href="?mode=menu" class="back-link">← Volver al Menú</a>
+      <a href="?mode=menu" class="back-link">← Volver al Menú</a>
 
-        <form method="post" id="closeForm" action="?mode=charge">
+      <form method="post"
+            id="closeForm"
+            action="?mode=charge"
+            data-has-warning="{% if pending_plate_warning %}1{% else %}0{% endif %}">
           <div class="card-title">Procesar Salida</div>
           {% csrf_token %}
           {{ close_form.ticket_id }}
+          <input type="hidden" name="confirm_pending_plate" id="id_confirm_pending_plate" value="0">
 
           <p>
             {{ close_form.plate.label_tag }}
@@ -506,8 +510,42 @@
             <small id="plateErrorCloseMonthly" style="color:#dc3545; display:none; margin-top:6px; font-weight:700;">
               ⛔ Esta placa es CLIENTE MENSUAL. No se cobra desde este módulo.
             </small>
-
           </p>
+
+          {% if pending_plate_warning %}
+            <div style="
+                margin: 14px 0 16px 0;
+                padding: 14px 16px;
+                border-radius: 12px;
+                background: #fff3cd;
+                border: 1px solid #ffe69c;
+                color: #664d03;
+                font-size: 0.95rem;
+                font-weight: 700;
+            ">
+              <div>
+                <strong>Advertencia:</strong>
+                La placa <strong>{{ pending_plate_warning.plate }}</strong> tiene
+                <strong>{{ pending_plate_warning.count }}</strong>
+                ticket{{ pending_plate_warning.count|pluralize }} pendiente{{ pending_plate_warning.count|pluralize }}.
+              </div>
+
+              <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
+                <button type="submit"
+                        class="submit-btn"
+                        style="max-width:260px;"
+                        onclick="document.getElementById('id_confirm_pending_plate').value='1';">
+                  Continuar de todos modos
+                </button>
+
+                <a href="{% url 'parking:operator_panel' %}?mode=menu"
+                  class="mini-btn"
+                  style="text-decoration:none;">
+                  Cancelar
+                </a>
+              </div>
+            </div>
+          {% endif %}
 
           <div id="paymentGateBlock" style="display:none;">
             <p>
@@ -725,6 +763,7 @@
                       {{ t.vehicle_type.name }} • {{ t.get_client_kind_display }}
                     </div>
 
+
                     {% if t.status != "ACTIVE" %}
                       <div class="subline" style="margin-top:6px;">
                         Parqueadero:
@@ -836,8 +875,49 @@
                   </div>
 
                   <div class="subline">
-                    {{ t.vehicle_type.name }} • {{ t.get_client_kind_display }}
+                    <strong>{{ t.vehicle_type.name }}</strong> • {{ t.get_client_kind_display }}
                   </div>
+
+                  <div class="subline" style="margin-top:6px;">
+                    Entrada:
+                    <span class="mono" style="color:var(--text-muted);">
+                      {% if t.check_in %}{{ t.check_in|date:"d/m/Y H:i" }}{% else %}—{% endif %}
+                    </span>
+                    &nbsp;|&nbsp;
+                    Salida:
+                    <span class="mono" style="color:var(--text-muted);">
+                      {% if t.check_out %}{{ t.check_out|date:"d/m/Y H:i" }}{% else %}—{% endif %}
+                    </span>
+                  </div>
+
+                  <div class="subline" style="margin-top:6px;">
+                    Parqueadero:
+                    <span class="mono">
+                      {% if t.parking_amount_ui %}
+                        ${{ t.parking_amount_ui }}
+                      {% else %} — {% endif %}
+                    </span>
+                    &nbsp;|&nbsp;
+                    Servicio:
+                    <span class="mono">
+                      {% if t.service_text_ui and t.service_amount_ui %}
+                        {{ t.service_text_ui }} (${{ t.service_amount_ui }})
+                      {% else %} — {% endif %}
+                    </span>
+                    &nbsp;|&nbsp;
+                    Total:
+                    <span class="mono">
+                      {% if t.total_amount_ui %}
+                        ${{ t.total_amount_ui }}
+                      {% else %} — {% endif %}
+                    </span>
+                  </div>
+
+                  {% if t.company %}
+                    <div class="subline" style="margin-top:6px;">
+                      Empresa: <strong>{{ t.company.full_name|default:t.company }}</strong>
+                    </div>
+                  {% endif %}
                 </td>
 
                 <td style="text-align:right; white-space:nowrap;">
@@ -867,7 +947,7 @@
       </div>
     </div>
 
-      
+
 
 
 
@@ -1120,6 +1200,7 @@
     const workAmountRow = document.getElementById("workAmountRow");
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const hasPendingWarning = form.dataset.hasWarning === "1";
 
     // ==========================================================
     // ✅ Estado del ticket reportado por el backend en "quote"
@@ -1289,24 +1370,31 @@
     // ==========================================================
     // Reset inicial (sin romper)
     // ==========================================================
-    if (method) method.value = "";
-    if (invoice) invoice.value = "";
-    if (companyInput) companyInput.value = "";
-    if (transferInput) transferInput.value = "";
-    if (workType) workType.value = "";
-    if (workAmount) workAmount.value = "";
-    if (workAmount) {
-      workAmount.readOnly = false;
-      workAmount.disabled = false;   // ✅ NUNCA disabled aquí
-    }
-    show(workAmountRow, false);
+    if (!hasPendingWarning) {
+      if (method) method.value = "";
+      if (invoice) invoice.value = "";
+      if (companyInput) companyInput.value = "";
+      if (transferInput) transferInput.value = "";
+      if (workType) workType.value = "";
+      if (workAmount) workAmount.value = "";
+      if (workAmount) {
+        workAmount.readOnly = false;
+        workAmount.disabled = false;
+      }
+      show(workAmountRow, false);
 
-    show(paymentGateBlock, false);
-    if (priceDisplay) priceDisplay.style.display = "none";
-    show(plateError, false);
-    show(plateErrorFmt, false);
-    setBtnState(submitBtn, false);
-    show(plateErrorMonthly, false);
+      show(paymentGateBlock, false);
+      if (priceDisplay) priceDisplay.style.display = "none";
+      show(plateError, false);
+      show(plateErrorFmt, false);
+      setBtnState(submitBtn, false);
+      show(plateErrorMonthly, false);
+    } else {
+      show(paymentGateBlock, true);
+      show(plateError, false);
+      show(plateErrorFmt, false);
+      show(plateErrorMonthly, false);
+    }
 
     // ==========================================================
     // Autocomplete por NOMBRE (solo si NO es ASSIGNED)
@@ -1606,8 +1694,16 @@
           // ✅ Precargar servicio guardado del ticket (si backend lo envía)
           prefillServiceFromTicket(data);
 
-          applyUI();
-          workUI();
+          if (hasPendingWarning) {
+            fetchQuoteAndExistence().then(() => {
+              applyUI();
+              workUI();
+              setBtnState(submitBtn, basicValid());
+            });
+          } else {
+            applyUI();
+            workUI();
+          }
         } else {
           plateExists = false;
           isPendingTicket = false;
